@@ -1624,11 +1624,14 @@ function newsCard(post) {
 
 function renderNews(view) {
   const posts = DATA.news || [];
-  if (!posts.length) { view.appendChild(el("div", "empty", "No league news yet — the insiders post after each advance.")); return; }
+  // Without a Help tab, the site's line about counting visits sits under the news (visitNote).
+  const note = hasHelp() ? null : visitNote();
+  if (!posts.length) { view.appendChild(el("div", "empty", "No league news yet — the insiders post after each advance.")); if (note) view.appendChild(note); return; }
   const feed = el("div", "grid feed");
   for (const post of posts) feed.appendChild(newsCard(post));
   view.appendChild(feed);
   view.appendChild(el("div", "news-disclaimer", "League insiders are AI-generated parody personalities built from this league's real synced data. Not real people posting, not real reporting."));
+  if (note) view.appendChild(note);
 }
 
 /* ---------- The league relay's answers ----------
@@ -2223,6 +2226,7 @@ function unmountTradeQueueDrawer() {
   const d = tqDrawer;
   if (!d) return;
   tqDrawer = null;
+  holdNavOpen(); // its X sits over the Menu button: a double tap's second tap mustn't open the menu
   if (d.tickTimer != null) clearTimeout(d.tickTimer);
   document.removeEventListener("keydown", d.onKey);
   document.body.classList.remove("tq-locked");
@@ -5526,6 +5530,8 @@ function renderHelp(view) {
     const card = el("div", "card");
     card.appendChild(el("div", "empty", "No help posted yet."));
     wrap.appendChild(card);
+    const none = visitNote();
+    if (none) wrap.appendChild(none);
     view.appendChild(wrap);
     return;
   }
@@ -5538,6 +5544,8 @@ function renderHelp(view) {
     group.appendChild(helpList(commissioners));
     wrap.appendChild(group);
   }
+  const note = visitNote();
+  if (note) wrap.appendChild(note);
   view.appendChild(wrap);
 }
 
@@ -5556,6 +5564,96 @@ function revealHelpSection() {
   if (typeof item.scrollIntoView === "function") item.scrollIntoView({ block: "start" });
   item.classList.add("help-flash");
   setTimeout(() => item.classList.remove("help-flash"), RULE_FLASH_MS);
+}
+
+/* ---------- Visit counting (Google Analytics 4) ----------
+   Cory, 2026-11-13: "use the same analytics we use for the Sunday acre so I can see how
+   many times people visit." Only a site.json that carries ga4 (a G- measurement ID: the
+   bot puts SITE_GA4_ID there, per league) turns this on, once it has loaded; a league
+   without one loads no Google Analytics (no Tag Manager script, no hits; the Google Fonts
+   stylesheet in index.html is separate and loads for every league). Nor does a visitor
+   whose browser sends Global Privacy Control or Do Not Track: no tag, no hits.
+
+   One page_view per page the visitor sees: the one the address opened on, then each tab
+   tapped, each team page, game page, Draft HQ or Trade Queue opened or closed, and each
+   Back / Forward that lands on another page. Never for a page drawn again in place (a
+   sort, a trade-builder tap, a Trade Queue check): render() runs for those too, so a page
+   is counted when its key changes, not when it is drawn. page_title names the page
+   ("Standings", "Team: Kansas City Chiefs", "Game: Chiefs at Raiders"); page_location is
+   the full address. A link to a part of the page already showing (#help-<id> on the Help
+   tab, #rules-<id> on Rules) is the same page.
+
+   GA4's enhanced measurement "Page changes based on browser history events" MUST be OFF
+   for this stream (Admin > Data streams > the stream > Enhanced measurement > Page views >
+   Show advanced settings). The tag is configured with send_page_view: false and the page
+   views are this script's, but the site moves between tabs with history.pushState and
+   replaceState, and with that setting on GA counts its own page view for each of those
+   too: every tab change would count twice. */
+
+const GA4_ID = /^G-[A-Z0-9]{4,20}$/; // the bot's own check (siteExport.ts), again: the ID goes into a script URL
+const VISIT_TAB_TITLES = { home: "Home", teams: "Teams", players: "Players", freeagents: "Free Agents", standings: "Standings", rankings: "Rankings", leaders: "Leaders", updates: "Updates", transactions: "Transactions", news: "News", rules: "Rules", trade: "Trade", help: "Help" };
+const VISIT_NOTE_TEXT = "This site counts visits with Google Analytics. A browser that sends Global Privacy Control or Do Not Track isn't counted.";
+let visitId = null; // the measurement ID once counting has started; null = nothing is counted
+let visitKey = null; // the page last counted
+
+/* site.json's measurement ID, or null when it has none or it isn't one. */
+function visitIdOf(data) {
+  const id = data && typeof data.ga4 === "string" ? data.ga4 : "";
+  return GA4_ID.test(id) ? id : null;
+}
+
+/* The visitor asked not to be tracked: Global Privacy Control, or Do Not Track. */
+function visitOptedOut(nav, win) {
+  if (nav && nav.globalPrivacyControl === true) return true;
+  return Boolean((nav && (nav.doNotTrack === "1" || nav.msDoNotTrack === "1")) || (win && win.doNotTrack === "1"));
+}
+
+/* Once site.json is in: the standard gtag.js setup, with no page view of its own. */
+function startVisitCounting(data) {
+  if (visitId) return;
+  const id = visitIdOf(data);
+  if (!id) return;
+  if (visitOptedOut(typeof navigator === "undefined" ? null : navigator, window)) return;
+  window.dataLayer = window.dataLayer || [];
+  window.gtag = window.gtag || function gtag() { window.dataLayer.push(arguments); };
+  window.gtag("js", new Date());
+  window.gtag("config", id, { send_page_view: false });
+  const tag = document.createElement("script");
+  tag.async = true;
+  tag.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
+  (document.head || document.body).appendChild(tag);
+  visitId = id;
+}
+
+/* The page showing, as a key (a new key is a new page) and the title GA reports it by. */
+function visitPage() {
+  if (viewDraftHq) return { key: "draft-hq", title: "Draft HQ" };
+  if (viewTeamId != null) {
+    const t = teamIndex.get(viewTeamId);
+    const name = t ? [t.city, t.nick].filter(Boolean).join(" ") : "";
+    return { key: "team-" + viewTeamId, title: name ? "Team: " + name : "Team" };
+  }
+  if (viewGameId != null) {
+    const g = ((DATA && DATA.week && DATA.week.games) || []).find((x) => x && x.scheduleId === viewGameId);
+    const a = g && teamIndex.get(g.awayTeamId), h = g && teamIndex.get(g.homeTeamId);
+    return { key: "game-" + viewGameId, title: a && h ? `Game: ${a.nick} at ${h.nick}` : "Game" };
+  }
+  if (tradeQueueDrawerDue()) return { key: "trade-queue", title: "Trade Queue" };
+  return { key: activeTab, title: VISIT_TAB_TITLES[activeTab] || activeTab };
+}
+
+/* After every render: one page_view when the page drawn isn't the one last counted. */
+function countVisit() {
+  if (!visitId || !DATA) return;
+  const page = visitPage();
+  if (page.key === visitKey) return;
+  visitKey = page.key;
+  try { window.gtag("event", "page_view", { page_title: page.title, page_location: location.href }); } catch {}
+}
+
+/* The site's one line about it, for a site.json with an ID (Help, or News when there's no Help tab). */
+function visitNote() {
+  return visitIdOf(DATA) ? el("div", "news-disclaimer visit-note", VISIT_NOTE_TEXT) : null;
 }
 
 /* ---------- App shell ---------- */
@@ -5693,6 +5791,7 @@ function tabUnderLinks() {
    in-page link): route it. A fragment that changes the tab (#rules, or Back off it) moves
    the bar's highlight too, inside the transition the way a tap does. */
 function routeChanged() {
+  if (navMenuRouted()) return; // the phones' menu drawer opening or shutting (its own entry)
   const from = currentViewKey(), fromTab = activeTab;
   routeFromHash();
   fxHistory(from, activeTab === fromTab ? render : () => { markTab(activeTab); render(); });
@@ -5723,6 +5822,7 @@ function render() {
   // The Trade Queue drawer, over the page and outside #view, then follows the route: shown,
   // drawn again or taken down, whichever page was drawn.
   syncTradeQueueDrawer();
+  countVisit(); // a page_view only when this is another page than the one last counted
 }
 function renderView() {
   const view = document.getElementById("view");
@@ -5785,6 +5885,7 @@ function markTab(name) {
     b.setAttribute("aria-selected", String(on));
     if (on) revealTab(b);
   }
+  syncNavCurrent();
 }
 function revealTab(btn) {
   const bar = btn.parentNode;
@@ -5797,6 +5898,277 @@ function revealTab(btn) {
 for (const btn of document.querySelectorAll(".tab")) {
   btn.addEventListener("click", () => showTab(btn.dataset.tab));
 }
+
+/* ---------- Menu drawer (phones) ----------
+   Cory, 2026-11-13, on an iPhone: "can we optimize for mobile? Maybe have the menus be a
+   side drawer instead of at the bottom. It's too crushed together. Gotta have that peak
+   dexterity to hit the right button." Below 900px the bottom tab bar is gone (styles.css):
+   the masthead says which section is showing and holds a Menu button, and the button opens
+   this drawer from the right with every section the bar had, one full-width row each under
+   its full name. A row does exactly what its tab does (showTab), so the addresses, the
+   links into the site and Back behave as they always did. At 900px and up there is no
+   button: the tabs are the row under the masthead, untouched.
+   It behaves as the Trade Queue's drawer does. Opening pushes a history entry at the same
+   address (its state names this opening), so the phone's Back closes it and nothing else,
+   and its own close (X, Escape, the overlay, a row) goes Back off that entry; a row's tab
+   is shown once Back has landed, on the entry the drawer opened over. Focus moves in, stays
+   in, and comes back to the Menu button; the page under it can't scroll and can't be
+   reached (inert); it slides only for a member who hasn't asked for less motion. It never
+   opens by itself, and a phone turned wide enough for the desktop tabs closes it. */
+
+const NAV_NAMES = { home: "Home", teams: "Teams", players: "Players", freeagents: "Free Agents", standings: "Standings", rankings: "Power Rankings", leaders: "Leaders", updates: "Player Updates", transactions: "Moves", news: "News", rules: "Rules", trade: "Trade", help: "Help" };
+const NAV_WIDE = "(min-width: 900px)"; // the desktop tabs' width (styles.css): no drawer there
+const NAV_LEAVE_MS = 180; // the drawer's slide out, with motion (styles.css .nav-leaving)
+let navMenu = null; // while open: { token, url, pushed, closing, pending, onKey, inerted, timer }
+let navSeq = 0;
+let navLeaveTimer = null;
+/* A quick second tap. The drawer's X (and the Trade Queue's) sits where the Menu button is,
+   so a double tap on Menu would shut the drawer it had just opened, and a double tap on an X
+   would open the menu again once the page under it was live (review, 2026-11-13, with real
+   touch taps 60-250ms apart). For a moment after the drawer shows, its X and overlay ignore
+   taps; for a moment after either drawer shuts, the Menu button does (while one still
+   shows, the Menu can't open anyway). And for that moment no tap reaches the page: once the
+   drawer is shut its overlay takes no taps, so a double tap's second tap on the overlay or a
+   row would open whatever the new page has there (a team, Draft HQ, a search box's keyboard;
+   review, 2026-11-13). The tab bar never did that: a second tap hit the same tab. */
+const NAV_TAP_HOLD_MS = 350;
+let navOpenHold = null; // timer while the Menu button, and the page, ignore taps
+/* The second tap, swallowed before anything sees it (capture, on the document): its press,
+   so nothing takes focus, its touchend, so no mouse events or click follow on a phone, and
+   its click. Not while a drawer shows (the drawer's own taps are its own), and not a click a
+   keyboard or a script made (detail 0): Enter on a focused button is no double tap. The
+   touchend is only cancelled, never stopped: its touchstart went through, and a strip that
+   holds on touchstart (the score ticker) must still hear the release, or it stays frozen
+   (review 3, 2026-11-13). Cancelling it is what keeps the mouse events and click away. */
+function navSwallowTap(e) {
+  if (navOpenHold == null || navMenu || tqDrawer || !e) return;
+  if (e.type === "click" && e.detail === 0) return;
+  if (typeof e.preventDefault === "function") e.preventDefault();
+  if (e.type === "touchend") return;
+  if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+  if (typeof e.stopPropagation === "function") e.stopPropagation();
+}
+let navShutHold = null; // timer while the X and the overlay ignore taps
+function holdNavOpen() {
+  if (navOpenHold != null) clearTimeout(navOpenHold);
+  navOpenHold = setTimeout(() => { navOpenHold = null; }, NAV_TAP_HOLD_MS);
+}
+/* Openings a row shut. Their entries are still ahead in history (a row goes Back off the
+   entry, then shows its tab), and Forward onto one has nothing to show: the page it opened
+   over is gone. Such an entry is stepped back off, so Forward changes nothing, as it never
+   did after a tab's tap, and the next Back leaves the page at once. */
+const navSpent = new Set();
+let navStepTimer = null; // stepping Back off a spent entry: where it lands isn't routed
+
+function navMenuParts() {
+  const ov = document.getElementById("nav-ov");
+  const list = document.getElementById("nav-list");
+  const btn = document.getElementById("nav-menu");
+  return ov && list && btn ? { ov, list, btn, panel: document.getElementById("nav-drawer") || ov, close: document.getElementById("nav-close") } : null;
+}
+function navHere() { return location.pathname + location.search + (location.hash || ""); }
+function navEntry() {
+  try { const s = history.state; return s && typeof s.navMenu === "string" ? s : null; } catch { return null; }
+}
+
+/* The masthead's week. A name too long for a phone's masthead carries a short one too, and
+   styles.css shows that one below 900px (only it, so a screen reader reads one name). */
+const WEEK_SHORT = { "Conference Championship": "Conf. Champ." };
+function setWeekChip(chip, label) {
+  if (!chip) return;
+  const text = label || "—";
+  const short = Object.prototype.hasOwnProperty.call(WEEK_SHORT, text) ? WEEK_SHORT[text] : null;
+  if (!short) { chip.textContent = text; return; }
+  chip.replaceChildren(el("span", "wk-long", text), el("span", "wk-short", short));
+}
+
+/* The masthead's word for the section showing (a team or game page shows its tab's). */
+function syncNavCurrent() {
+  const label = document.getElementById("nav-current");
+  if (label) label.textContent = NAV_NAMES[activeTab] || "";
+}
+
+/* The rows, from the tabs in the bar's order, so a tab the league doesn't have (Rules, Help)
+   is never a row. Help, the how-to, sits apart at the foot. The section showing is marked by
+   a bar and a heavier name as well as the red, and aria-current for a screen reader. */
+function navRows(list) {
+  const main = el("ul", "nav-group");
+  const foot = el("ul", "nav-group nav-group-foot");
+  for (const tab of document.querySelectorAll(".tab")) {
+    const name = tab.dataset ? tab.dataset.tab : null;
+    if (tab.hidden || !name || !NAV_NAMES[name]) continue;
+    const row = el("button", "nav-row");
+    row.type = "button";
+    row.dataset.nav = name;
+    const icon = typeof tab.querySelector === "function" ? tab.querySelector("svg") : null;
+    if (icon && typeof icon.cloneNode === "function") {
+      const copy = icon.cloneNode(true);
+      copy.setAttribute("aria-hidden", "true");
+      copy.setAttribute("focusable", "false");
+      row.appendChild(copy);
+    }
+    row.appendChild(el("span", "nav-row-name", NAV_NAMES[name]));
+    if (name === activeTab) { row.classList.add("current"); row.setAttribute("aria-current", "page"); }
+    row.addEventListener("click", () => closeNavMenu(name));
+    const li = el("li");
+    li.appendChild(row);
+    (name === "help" ? foot : main).appendChild(li);
+  }
+  list.replaceChildren(...[main, foot].filter((g) => g.children.length));
+}
+
+/* The Menu button's tap. */
+function openNavMenu() {
+  if (navMenu || tqDrawer || fxMedia(NAV_WIDE)) return; // the Trade Queue's drawer covers the masthead while it shows
+  if (navOpenHold != null) return; // a drawer has just shut: this is the second tap of a double tap on its X
+  const p = navMenuParts();
+  if (!p) return;
+  const token = Date.now().toString(36) + "-" + ++navSeq;
+  let pushed = false;
+  try {
+    history.pushState({ navMenu: token, view: currentViewKey() }, "", navHere());
+    pushed = Boolean(navEntry()) && navEntry().navMenu === token;
+  } catch {}
+  mountNavMenu(p, token, pushed);
+}
+
+function mountNavMenu(p, token, pushed) {
+  if (navLeaveTimer != null) { clearTimeout(navLeaveTimer); navLeaveTimer = null; }
+  p.ov.classList.remove("nav-leaving");
+  navRows(p.list);
+  // Escape closes; Tab and Shift+Tab stay inside (the Trade Queue drawer's way).
+  const onKey = (e) => {
+    if (e.key === "Escape") { closeNavMenu(); return; }
+    if (e.key !== "Tab" || typeof p.panel.querySelectorAll !== "function") return;
+    const stops = [...p.panel.querySelectorAll("button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+    if (!stops.length) return;
+    const first = stops[0], last = stops[stops.length - 1];
+    const at = document.activeElement;
+    const inside = p.panel.contains(at);
+    if (e.shiftKey ? (at === first || !inside) : (at === last || !inside)) {
+      if (typeof e.preventDefault === "function") e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  };
+  document.addEventListener("keydown", onKey);
+  // Everything but the drawer is out of reach while it shows: no taps, no focus, no reading.
+  const inerted = [];
+  for (const n of [...document.body.children]) {
+    if (n === p.ov || n.nodeType !== 1 || n.getAttribute("inert") !== null) continue;
+    n.setAttribute("inert", "");
+    inerted.push(n);
+  }
+  navMenu = { token, url: navHere(), pushed, closing: false, pending: null, onKey, inerted, timer: null };
+  if (navShutHold != null) clearTimeout(navShutHold);
+  navShutHold = setTimeout(() => { navShutHold = null; }, NAV_TAP_HOLD_MS);
+  p.ov.hidden = false;
+  document.body.classList.add("nav-locked");
+  p.btn.setAttribute("aria-expanded", "true");
+  const current = p.list.querySelector ? p.list.querySelector(".nav-row.current") : null;
+  focusQuietly(current || p.close || p.panel);
+}
+
+/* X, Escape, the overlay, or a row (`pending`: the tab to show once it's shut). Opened with
+   an entry of its own, it goes Back off that entry and routeChanged finishes the close where
+   Back lands; a Back that never lands closes it in place after a grace. */
+function closeNavMenu(pending) {
+  const d = navMenu;
+  if (!d || d.closing) return;
+  d.pending = typeof pending === "string" ? pending : null;
+  const entry = navEntry();
+  if (d.pushed && entry && entry.navMenu === d.token) {
+    d.closing = true; // a second tap mustn't go Back twice
+    try { history.back(); } catch {}
+    d.timer = setTimeout(() => {
+      const still = navEntry();
+      if (navMenu === d && still && still.navMenu === d.token) finishNavMenu(d);
+    }, TQ_BACK_GRACE_MS);
+    return;
+  }
+  finishNavMenu(d);
+}
+function finishNavMenu(d) {
+  if (d.pending) navSpent.add(d.token);
+  unmountNavMenu(Boolean(d.pending));
+  if (d.pending) showTab(d.pending);
+}
+
+/* `now`: gone at once, with no slide (a row's tab is about to change the page, and the
+   page's own transition is the motion). */
+function unmountNavMenu(now) {
+  const d = navMenu;
+  if (!d) return;
+  navMenu = null;
+  holdNavOpen();
+  if (d.timer != null) clearTimeout(d.timer);
+  if (navShutHold != null) { clearTimeout(navShutHold); navShutHold = null; }
+  document.removeEventListener("keydown", d.onKey);
+  for (const n of d.inerted) n.removeAttribute("inert");
+  document.body.classList.remove("nav-locked");
+  const p = navMenuParts();
+  if (!p) return;
+  p.btn.setAttribute("aria-expanded", "false");
+  // Shut because the screen turned wide: the Menu button is gone (display: none), so focus
+  // goes to the tab showing in the desktop row rather than falling to the page's body.
+  const gone = fxMedia(NAV_WIDE) || p.btn.offsetParent === null;
+  const tab = gone ? [...document.querySelectorAll(".tab")].find((t) => t.dataset && t.dataset.tab === activeTab) : null;
+  focusQuietly(tab || p.btn);
+  if (now || !fxMotionOK()) { p.ov.hidden = true; return; }
+  p.ov.classList.add("nav-leaving");
+  navLeaveTimer = setTimeout(() => { navLeaveTimer = null; p.ov.hidden = true; p.ov.classList.remove("nav-leaving"); }, NAV_LEAVE_MS);
+}
+
+/* routeChanged's first word on a back / forward: true when it was the drawer's own and
+   there's nothing to route. Back off the drawer's entry lands on the address it opened
+   over: the drawer shuts (and a row's tab shows). Forward onto an entry of the drawer's,
+   with the same page still showing, opens it again, as the Trade Queue's does; Forward
+   onto one whose opening is over is stepped back off (navSpent). Any other move shuts it
+   and is routed as usual. */
+function navMenuRouted() {
+  const d = navMenu;
+  const entry = navEntry();
+  if (d) {
+    if (entry && entry.navMenu === d.token) return true;
+    const own = navHere() === d.url;
+    if (!own) d.pending = null;
+    finishNavMenu(d);
+    return own;
+  }
+  if (navStepTimer != null && !entry) { clearTimeout(navStepTimer); navStepTimer = null; return true; }
+  if (!entry) return false;
+  if (!navSpent.has(entry.navMenu) && entry.view === currentViewKey() && !fxMedia(NAV_WIDE) && !tqDrawer) {
+    const p = navMenuParts();
+    if (p) { mountNavMenu(p, entry.navMenu, true); return true; }
+  }
+  // Its opening is over (a row took the member on, or another page is showing now): step
+  // back off it to the page showing, which isn't routed again.
+  if (navStepTimer == null) {
+    navStepTimer = setTimeout(() => { navStepTimer = null; }, TQ_BACK_GRACE_MS);
+    try { history.back(); } catch {}
+  }
+  return true;
+}
+
+(function wireNavMenu() {
+  const p = navMenuParts();
+  if (!p) return;
+  p.btn.addEventListener("click", () => openNavMenu());
+  if (typeof document.addEventListener === "function") {
+    for (const t of ["pointerdown", "mousedown", "touchend", "click"]) document.addEventListener(t, navSwallowTap, { capture: true, passive: false });
+  }
+  // Neither shuts it in the moment after it opened: that is a double tap's second tap on Menu.
+  if (p.close) p.close.addEventListener("click", () => { if (navShutHold == null) closeNavMenu(); });
+  // A tap on the overlay, not one inside the drawer that bubbled up to it.
+  p.ov.addEventListener("click", (e) => { if (e && e.target === p.ov && navShutHold == null) closeNavMenu(); });
+  // A phone turned (or a window widened) to the desktop tabs: the drawer has no place there.
+  try {
+    const wide = window.matchMedia(NAV_WIDE);
+    if (wide && typeof wide.addEventListener === "function") wide.addEventListener("change", (e) => { if (e && e.matches) closeNavMenu(); });
+  } catch {}
+  // A reload while it was open: the entry it pushed is still the page's, but it stays shut.
+  const entry = navEntry();
+  if (entry) { try { history.replaceState(null, "", navHere()); } catch {} }
+})();
 
 /* ---------- Motion: page transitions, the score ticker, the GOTW glow ----------
    One motion voice for the whole site: quick, confident, broadcast. Page changes run
@@ -6208,11 +6580,14 @@ async function load() {
   tradeDropUnknownTeams(teamIndex);
   applyBranding(DATA.leagueName);
   try { mountCrest(document, typeof Image === "function" ? Image : null, "logo/crest-120.png"); } catch {}
-  document.getElementById("week-chip").textContent = DATA.weekLabel || "—";
+  setWeekChip(document.getElementById("week-chip"), DATA.weekLabel);
   syncRulesTab();
   syncHelpTab();
+  // Counting visits starts here, before the first render counts the page the address opened on.
+  try { startVisitCounting(DATA); } catch {}
   routeFromHash();
   if (activeTab !== "home") markTab(activeTab); // a #rules or #help link: the page opens on the tab
+  syncNavCurrent();
   render();
 }
 

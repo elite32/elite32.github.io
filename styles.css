@@ -20,7 +20,6 @@
   --gold-bright: #e8b84b;
   --up: #128a4d;
   --down: #c93a2a;
-  --tabbar-h: 62px;
   --radius: 10px;
 }
 
@@ -32,7 +31,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom); /* the home indicator; nothing else is down there on a phone */
   min-height: 100vh;
 }
 
@@ -136,6 +135,87 @@ body::after {
   padding: 5px 2px 5px 10px;
   background: none;
   margin-top: env(safe-area-inset-top);
+}
+
+/* ---------- Phones: the section showing and the Menu button ----------
+   Below 900px the bottom tab bar is gone (Cory, 2026-11-13: "too crushed together"). The
+   masthead's right side says where the member is, the week small over the section's name
+   (the way "THE" sits over the league's), and a Menu button at the right edge opens the
+   sections drawer (below). At 900px and up the wrapper is display: contents and the two new
+   pieces don't show, so the week chip sits in the bar exactly as it always has. */
+.mast-side { display: contents; }
+.nav-current, .nav-menu { display: none; }
+@media (max-width: 899px) {
+  .topbar { gap: 6px; padding-right: max(4px, env(safe-area-inset-right)); }
+  /* Room for the section's name. The red block's right padding comes in from 38px to 30px
+     (the slash keeps 8px clear of the name), and the league's name stays on one line (it
+     broke over two at 320px, the masthead taller). The section's side gives way first,
+     its name onto a second line; it never goes below 76px ("WEEK 18" and "RANKINGS" whole),
+     and only past that does the red block give way, clipped at its slash, never the page
+     wider (review, 2026-11-13: with a crest or a long league name the side had been
+     squeezed to a few pixels at 320px). */
+  .wordmark { flex: 0 1 auto; min-width: 0; padding-right: 30px; }
+  .wordmark-text { min-width: 0; }
+  .wordmark-main { white-space: nowrap; }
+  .mast-side {
+    display: flex; flex-direction: column; justify-content: center; gap: 2px;
+    flex: 0 1000 auto; min-width: 76px; margin-left: auto;
+    margin-top: env(safe-area-inset-top);
+    border-left: 3px solid var(--red-bright);
+    padding: 2px 0 2px 10px;
+  }
+  /* The week and the section's name each take two lines at most ("PRESEASON / WEEK 1" over
+     "POWER / RANKINGS"), which still fit the masthead's height. */
+  .mast-side .week-chip {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    margin-top: 0; border-left: 0; padding: 0;
+    font-size: 10px; letter-spacing: .04em; line-height: 1.1; color: rgba(255,255,255,.7);
+    overflow: hidden; overflow-wrap: break-word;
+  }
+  /* "Conference Championship" is 148px even at this size, wider than the side on a 320px
+     phone or beside a crest, and "CHAMPIONSHIP" alone is wider than the side at its 76px:
+     phones show "Conf. Champ." (app.js setWeekChip). */
+  .mast-side .wk-long { display: none; }
+  .mast-side .wk-short { display: inline; }
+  .nav-current {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    font-family: "Archivo", sans-serif; font-style: italic;
+    font-size: 15px; font-weight: 900; font-stretch: 80%;
+    letter-spacing: .03em; text-transform: uppercase; line-height: 1.05;
+    color: #fff;
+    overflow: hidden; overflow-wrap: break-word;
+  }
+  .nav-menu {
+    display: flex; align-items: center; justify-content: center; flex: none;
+    width: 48px; height: 48px; margin-top: env(safe-area-inset-top);
+    background: none; border: 0; border-radius: 10px;
+    color: #fff; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .nav-menu svg { width: 26px; height: 26px; fill: currentColor; }
+  .nav-menu:active, .nav-menu[aria-expanded="true"] { background: rgba(255,255,255,.12); }
+  .nav-menu:focus-visible { outline: 2px solid var(--red-bright); outline-offset: -2px; }
+}
+.wk-short { display: none; }
+/* A league's crest on phones: 32px below 400px, so it costs the section's name 8px less
+   (and the masthead no taller than without one); none below 360px, where the league's name
+   and the section's need all of the width (measured in Chrome, 2026-11-13). */
+@media (max-width: 399px) {
+  .wordmark:has(.wordmark-crest) { gap: 8px; }
+  .wordmark-crest { height: 32px; }
+}
+@media (min-width: 360px) and (max-width: 399px) {
+  /* Beside a crest and a long league name the side is at its 76px, as on a 320px phone, so the
+     name is set as it is there (review, 2026-11-13: at 14px "POWER RANKI…" beside a crest and
+     "JM-27 League" at 360px). */
+  .topbar:has(.wordmark-crest) .mast-side { padding-left: 8px; }
+  .topbar:has(.wordmark-crest) .nav-current { font-size: 13px; letter-spacing: 0; }
+}
+/* 320px phones: "Power Rankings" and "Player Updates" whole beside the league's name. */
+@media (max-width: 359px) {
+  .mast-side { padding-left: 8px; }
+  .nav-current { font-size: 13px; letter-spacing: 0; }
+  .wordmark-crest { display: none; }
 }
 
 /* ---------- iOS install hint ---------- */
@@ -619,7 +699,7 @@ a.card:active { background: var(--surface-2); }
   font-family: inherit; white-space: nowrap;
 }
 .trade-summary {
-  position: sticky; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  position: sticky; bottom: calc(env(safe-area-inset-bottom) + 8px);
   margin-top: 14px;
   background: var(--surface-2);
   border: 1px solid var(--edge); border-radius: var(--radius);
@@ -905,7 +985,7 @@ a.card:active { background: var(--surface-2); }
 .fit-badge.fit-depth { color: var(--text-dim); background: var(--surface-2); }
 .fit-badge.fit-luxury { color: #7b4fd0; background: rgba(123,79,208,.12); }
 .tab .ts { display: none; }
-/* Short labels on phones, and on narrow desktops too: with eleven tabs (Updates and
+/* Short labels on narrow desktops: with eleven tabs (Updates and
    Transactions joined on 2026-10-16) the full-label nav is ~1245px wide, so full
    labels wait for a 1280px window; below that the nav would scroll. */
 @media (max-width: 1279px) {
@@ -947,16 +1027,17 @@ a.card:active { background: var(--surface-2); }
 /* ---------- Empty states ---------- */
 .empty { color: var(--text-faint); text-align: center; padding: 34px 20px; font-size: 13px; }
 
-/* ---------- Tab bar ---------- */
+/* ---------- Tab bar ----------
+   The tabs are the desktop's row under the masthead (the Desktop block below shows it at
+   900px and up). Below 900px there is no bar: the masthead's Menu button opens the sections
+   drawer instead (Cory, 2026-11-13, of the old bottom bar on an iPhone: "It's too crushed
+   together. Gotta have that peak dexterity to hit the right button"). */
 .tabbar {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 30;
-  display: flex;
+  z-index: 30;
+  display: none;
   background: rgba(255,255,255,.96);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border-top: 1px solid var(--edge);
-  padding-bottom: env(safe-area-inset-bottom);
-  height: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
   box-shadow: 0 -1px 6px rgba(16,21,27,.05);
 }
 .tab {
@@ -972,77 +1053,9 @@ a.card:active { background: var(--surface-2); }
    display: flex above beats the browser's own [hidden] rule (the iOS hint's bug, 2026-10-16),
    so without this every league would get an empty Rules tab. */
 .tab[hidden] { display: none; }
-/* Ten tabs on a 360px phone are 36px each. "Leaders" (37px at 9px) and "Updates" (39px)
-   don't fit, and shrinking every label to 8px to squeeze them in left the two about 2px
-   apart and hard to read (review, 2026-10-16). So the phone bar abbreviates those two the
-   way it already does Stand. and Ranks, and every label stays at 9px down to 360px.
-   pl/ps = phone long/short; the desktop nav has room for both words at every width. */
+/* pl/ps = phone long/short, from the old bottom bar's labels ("Lead.", "Upd."): the desktop
+   nav has room for both words at every width, and phones have the drawer's full names. */
 .tab .ps { display: none; }
-@media (max-width: 899px) {
-  .tab .pl { display: none; }
-  .tab .ps { display: inline; }
-}
-/* Eleven tabs since Transactions ("Moves") joined (2026-10-16). Equal widths are 32.7px
-   a tab at 360px, narrower than "Players" at 9px, and a 40px floor per tab made the bar
-   440px wide, so on every phone narrower than that (every current iPhone) Trade sat
-   off-screen (review, 2026-10-16). So below 900px a tab is never narrower than its own
-   label, the spare width is shared out equally, and the labels stay at 9px down to
-   360px. Where even the labels alone don't fit (the narrowest phones), the bar scrolls
-   sideways and the shadows at its ends say so; the "local" white covers ride with the
-   tabs and hide the shadow at an end the bar has reached, and both when it fits. */
-@media (max-width: 899px) {
-  .tabbar {
-    overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
-    background:
-      linear-gradient(to right, #fff 40%, rgba(255,255,255,0)) left center / 28px 100% no-repeat local,
-      linear-gradient(to left, #fff 40%, rgba(255,255,255,0)) right center / 28px 100% no-repeat local,
-      radial-gradient(farthest-side at 0 50%, rgba(16,21,27,.16), rgba(16,21,27,0)) left center / 12px 100% no-repeat scroll,
-      radial-gradient(farthest-side at 100% 50%, rgba(16,21,27,.16), rgba(16,21,27,0)) right center / 12px 100% no-repeat scroll,
-      rgba(255,255,255,.96);
-  }
-  .tabbar::-webkit-scrollbar { display: none; }
-  .tab { flex: 1 1 0; min-width: max-content; padding-left: 2px; padding-right: 2px; }
-  .tab span { overflow: visible; }
-}
-/* Below 360 (320px phones): 8px keeps all eleven on one screen down to about 312px. */
-@media (max-width: 359px) {
-  .tab { font-size: 8px; }
-}
-/* Twelve tabs when the league has rules (2026-10-22). At 2px a side that bar is 368px wide,
-   so on a 360px phone Trade rode 8px off the edge. From 367px down a twelve-tab bar takes
-   1.5px a side instead: every label whole at 360px, 3px apart at the closest (measured in
-   Chrome). Eleven-tab bars are untouched, and a browser without :has() scrolls the 8px.
-   Help (2026-10-23) is a twelfth tab the same way for a league without rules: 364px at 2px,
-   352px at 1.5px. */
-@media (max-width: 367px) {
-  .tabbar:has(> .tab:is([data-tab="rules"], [data-tab="help"]):not([hidden])) > .tab { padding-left: 1.5px; padding-right: 1.5px; }
-}
-/* Below 360, with the 8px labels: at 1.5px the twelve-tab bar measured 326px, so a 320px
-   phone scrolled Trade 6px off where the eleven-tab bar fits (review, 2026-10-22). 1px a
-   side measured 314px: every label whole at 320px, 2px apart at the closest. */
-@media (max-width: 359px) {
-  .tabbar:has(> .tab:is([data-tab="rules"], [data-tab="help"]):not([hidden])) > .tab { padding-left: 1px; padding-right: 1px; }
-}
-/* Thirteen tabs, with Rules and Help both (2026-10-23), measured in Chrome: 393px at 2px a
-   side and 381px at 1.5px with the 9px labels; 349px at 1.5px and 336px at 1px with the
-   8px ones. Nothing goes tighter than the twelve-tab bar's floors (labels 3px apart from
-   360px up, 2px below; 1px a side and the 8px labels at the least), so:
-   - up to 393px, 1.5px a side: whole at 9px from 381px (390px and 393px iPhones);
-   - up to 380px, the 8px labels too, because at 9px Help, the tab members are sent to,
-     sat mostly off a 360px screen and partly off a 375px one (review, 2026-10-23): the
-     bar fits from 349px, every label whole and 3px apart at the closest;
-   - below 360, 1px a side: it fits from 336px, labels 2px apart, as the twelve-tab bar's.
-   On a 320px phone even that is 16px too wide, so there the bar scrolls sideways as it
-   always could, the ends shadowed, the tab shown scrolled into view (revealTab). */
-@media (max-width: 393px) {
-  .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { padding-left: 1.5px; padding-right: 1.5px; }
-}
-@media (max-width: 380px) {
-  .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { font-size: 8px; }
-}
-@media (max-width: 359px) {
-  .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { padding-left: 1px; padding-right: 1px; }
-}
 .tab svg { width: 20px; height: 20px; fill: currentColor; }
 .tab.active { color: var(--red-bright); }
 .tab:focus-visible { outline: 2px solid var(--red-bright); outline-offset: -2px; border-radius: 8px; }
@@ -1513,6 +1526,79 @@ a.card:active { background: var(--surface-2); }
   .tx-trade { padding: 12px 18px 14px; }
   /* Sides of a deal next to each other: two or three across, a fourth wraps. */
   .tx-sides { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+}
+
+/* ---------- Phones: the sections drawer (Menu) ----------
+   From the right, the Menu button's side: 84% of the screen up to 360px, the full height,
+   over a dimming overlay, the Trade Queue drawer's look. One row a section, each at least
+   50px tall with its tab's icon and full name at 16px+; the section showing is marked by a
+   red bar, a heavier name and a tint, not by the red alone. Help sits apart at the foot.
+   The notch and the home indicator are kept clear in Safari and in the installed app. It
+   slides only for a member who hasn't asked for less motion. Never at 900px and up. */
+body.nav-locked { overflow: hidden; }
+.nav-ov[hidden] { display: none; }
+.nav-ov {
+  position: fixed; inset: 0; z-index: 50; /* over the masthead (20); a player card (60) over it */
+  background: rgba(10, 12, 16, .55);
+  display: flex; justify-content: flex-end;
+}
+.nav-ov.nav-leaving { pointer-events: none; }
+.nav-drawer {
+  display: flex; flex-direction: column;
+  width: min(84%, 360px); height: 100%;
+  background: var(--surface);
+  box-shadow: -8px 0 40px rgba(16, 21, 27, .35);
+  outline: none;
+}
+.nav-drawer-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: calc(8px + env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 8px 16px;
+  border-bottom: 1px solid var(--edge);
+}
+.nav-drawer-title {
+  font-family: "Archivo", sans-serif; font-size: 14px; font-weight: 800; font-stretch: 80%;
+  letter-spacing: .16em; text-transform: uppercase;
+  border-left: 3px solid var(--red); padding-left: 8px;
+}
+.nav-close {
+  flex: none; width: 44px; height: 44px; line-height: 1;
+  background: var(--surface-2); border: 1px solid var(--edge); border-radius: 50%;
+  color: var(--text-dim); font-size: 15px; cursor: pointer;
+}
+.nav-close:focus-visible { outline: 2px solid var(--red-bright); outline-offset: 2px; }
+.nav-list {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 6px 0 calc(12px + env(safe-area-inset-bottom));
+}
+.nav-group { list-style: none; }
+.nav-group-foot { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--edge); }
+.nav-row {
+  position: relative;
+  display: flex; align-items: center; gap: 16px; width: 100%; min-height: 50px;
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px 20px;
+  background: none; border: 0; text-align: left; cursor: pointer;
+  font-family: inherit; font-size: 17px; font-weight: 600; color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-row svg { width: 22px; height: 22px; flex: none; fill: var(--text-faint); }
+.nav-row-name { min-width: 0; overflow-wrap: anywhere; }
+.nav-row:active { background: var(--surface-2); }
+@media (hover: hover) { .nav-row:hover { background: var(--surface-2); } }
+.nav-row:focus-visible { outline: 2px solid var(--red-bright); outline-offset: -3px; }
+.nav-row.current { background: rgba(208, 10, 16, .07); color: var(--red); font-weight: 800; }
+.nav-row.current svg { fill: var(--red); }
+.nav-row.current::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 4px;
+  border-radius: 0 3px 3px 0; background: var(--red);
+}
+@media (min-width: 900px) {
+  .nav-ov { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nav-ov { animation: tq-fade-in .2s ease-out; }
+  .nav-drawer { animation: tq-slide-in .26s cubic-bezier(.2, .8, .2, 1); }
+  .nav-ov.nav-leaving { animation: tq-fade-out .18s ease-in forwards; }
+  .nav-ov.nav-leaving .nav-drawer { animation: tq-slide-out .18s ease-in forwards; }
 }
 
 /* ---------- Trade queue (a drawer over the Trade tab, #trade-queue) ----------

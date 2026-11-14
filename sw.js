@@ -6,7 +6,7 @@
    that's the bug this version retires.) `cache: "no-cache"` on every fetch
    forces revalidation past GitHub Pages' 10-minute HTTP cache too. */
 
-const CACHE_NAME = "fo-shell-v8";
+const CACHE_NAME = "fo-shell-v9";
 
 self.addEventListener("install", (event) => {
   // No precache list to go stale — the cache fills organically from real visits.
