@@ -5574,9 +5574,14 @@ function revealHelpSection() {
    stylesheet in index.html is separate and loads for every league). Nor does a visitor
    whose browser sends Global Privacy Control or Do Not Track: no tag, no hits.
 
-   One page_view per page the visitor sees: the one the address opened on, then each tab
-   tapped, each team page, game page, Draft HQ or Trade Queue opened or closed, and each
-   Back / Forward that lands on another page. Never for a page drawn again in place (a
+   One page_view per page the visitor sees. The first, the page the address opened on,
+   gtag.js counts itself as it starts, under the document's title (the league's name) and
+   the address: nothing turns that off any more (send_page_view: false in the config is
+   ignored; checked 2026-11-14 in Chrome against the live property, where even Google's own
+   snippet with it, and a tag with no config at all, sent one), so this script doesn't count
+   that page again (the live site's first visits each counted twice). It counts every page
+   after it: each tab tapped, each team page, game page, Draft HQ or Trade Queue opened or
+   closed, and each Back / Forward that lands on another page. Never for a page drawn again in place (a
    sort, a trade-builder tap, a Trade Queue check): render() runs for those too, so a page
    is counted when its key changes, not when it is drawn. page_title names the page: a tab
    by the name the phone's masthead and Menu give it (NAV_NAMES: "Standings", "Power
@@ -5586,15 +5591,15 @@ function revealHelpSection() {
 
    GA4's enhanced measurement "Page changes based on browser history events" MUST be OFF
    for this stream (Admin > Data streams > the stream > Enhanced measurement > Page views >
-   Show advanced settings). The tag is configured with send_page_view: false and the page
-   views are this script's, but the site moves between tabs with history.pushState and
-   replaceState, and with that setting on GA counts its own page view for each of those
-   too: every tab change would count twice. */
+   Show advanced settings). After the first page the page views are this script's, but the
+   site moves between tabs with history.pushState and replaceState, and with that setting
+   on GA counts its own page view for each of those too: every tab change would count
+   twice. */
 
 const GA4_ID = /^G-[A-Z0-9]{4,20}$/; // the bot's own check (siteExport.ts), again: the ID goes into a script URL
 const VISIT_NOTE_TEXT = "This site counts visits with Google Analytics. A browser that sends Global Privacy Control or Do Not Track isn't counted.";
 let visitId = null; // the measurement ID once counting has started; null = nothing is counted
-let visitKey = null; // the page last counted
+let visitKey = null; // the page last counted; null until the first, which gtag.js counts itself
 
 /* site.json's measurement ID, or null when it has none or it isn't one. */
 function visitIdOf(data) {
@@ -5617,7 +5622,7 @@ function startVisitCounting(data) {
   window.dataLayer = window.dataLayer || [];
   window.gtag = window.gtag || function gtag() { window.dataLayer.push(arguments); };
   window.gtag("js", new Date());
-  window.gtag("config", id, { send_page_view: false });
+  window.gtag("config", id); // its own page_view of the page the address opened on: the first count
   const tag = document.createElement("script");
   tag.async = true;
   tag.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
@@ -5642,12 +5647,15 @@ function visitPage() {
   return { key: activeTab, title: NAV_NAMES[activeTab] || activeTab };
 }
 
-/* After every render: one page_view when the page drawn isn't the one last counted. */
+/* After every render: one page_view when the page drawn isn't the one last counted. The
+   first page drawn is the one the address opened on, which gtag.js counts itself. */
 function countVisit() {
   if (!visitId || !DATA) return;
   const page = visitPage();
   if (page.key === visitKey) return;
+  const opening = visitKey === null;
   visitKey = page.key;
+  if (opening) return;
   try { window.gtag("event", "page_view", { page_title: page.title, page_location: location.href }); } catch {}
 }
 
