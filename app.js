@@ -5578,10 +5578,11 @@ function revealHelpSection() {
    tapped, each team page, game page, Draft HQ or Trade Queue opened or closed, and each
    Back / Forward that lands on another page. Never for a page drawn again in place (a
    sort, a trade-builder tap, a Trade Queue check): render() runs for those too, so a page
-   is counted when its key changes, not when it is drawn. page_title names the page
-   ("Standings", "Team: Kansas City Chiefs", "Game: Chiefs at Raiders"); page_location is
-   the full address. A link to a part of the page already showing (#help-<id> on the Help
-   tab, #rules-<id> on Rules) is the same page.
+   is counted when its key changes, not when it is drawn. page_title names the page: a tab
+   by the name the phone's masthead and Menu give it (NAV_NAMES: "Standings", "Power
+   Rankings", "Moves"), a team or game page by its teams ("Team: Kansas City Chiefs",
+   "Game: Chiefs at Raiders"); page_location is the full address. A link to a part of the
+   page already showing (#help-<id> on the Help tab, #rules-<id> on Rules) is the same page.
 
    GA4's enhanced measurement "Page changes based on browser history events" MUST be OFF
    for this stream (Admin > Data streams > the stream > Enhanced measurement > Page views >
@@ -5591,7 +5592,6 @@ function revealHelpSection() {
    too: every tab change would count twice. */
 
 const GA4_ID = /^G-[A-Z0-9]{4,20}$/; // the bot's own check (siteExport.ts), again: the ID goes into a script URL
-const VISIT_TAB_TITLES = { home: "Home", teams: "Teams", players: "Players", freeagents: "Free Agents", standings: "Standings", rankings: "Rankings", leaders: "Leaders", updates: "Updates", transactions: "Transactions", news: "News", rules: "Rules", trade: "Trade", help: "Help" };
 const VISIT_NOTE_TEXT = "This site counts visits with Google Analytics. A browser that sends Global Privacy Control or Do Not Track isn't counted.";
 let visitId = null; // the measurement ID once counting has started; null = nothing is counted
 let visitKey = null; // the page last counted
@@ -5639,7 +5639,7 @@ function visitPage() {
     return { key: "game-" + viewGameId, title: a && h ? `Game: ${a.nick} at ${h.nick}` : "Game" };
   }
   if (tradeQueueDrawerDue()) return { key: "trade-queue", title: "Trade Queue" };
-  return { key: activeTab, title: VISIT_TAB_TITLES[activeTab] || activeTab };
+  return { key: activeTab, title: NAV_NAMES[activeTab] || activeTab };
 }
 
 /* After every render: one page_view when the page drawn isn't the one last counted. */
@@ -5955,10 +5955,11 @@ function holdNavOpen() {
 }
 /* Openings a row shut. Their entries are still ahead in history (a row goes Back off the
    entry, then shows its tab), and Forward onto one has nothing to show: the page it opened
-   over is gone. Such an entry is stepped back off, so Forward changes nothing, as it never
-   did after a tab's tap, and the next Back leaves the page at once. */
+   over is gone. Such an entry is stepped back off, so Forward takes the member nowhere: the
+   page showing is drawn again in place (scroll kept, no new page counted), as a tap on the
+   tab already showing draws it, and the next Back leaves the page at once. */
 const navSpent = new Set();
-let navStepTimer = null; // stepping Back off a spent entry: where it lands isn't routed
+let navStepTimer = null; // stepping Back off an entry whose opening is over: one step at a time
 
 function navMenuParts() {
   const ov = document.getElementById("nav-ov");
@@ -6122,8 +6123,8 @@ function unmountNavMenu(now) {
    there's nothing to route. Back off the drawer's entry lands on the address it opened
    over: the drawer shuts (and a row's tab shows). Forward onto an entry of the drawer's,
    with the same page still showing, opens it again, as the Trade Queue's does; Forward
-   onto one whose opening is over is stepped back off (navSpent). Any other move shuts it
-   and is routed as usual. */
+   or Back onto one whose opening is over is stepped back off (navSpent), and where that
+   lands is routed. Any other move shuts it and is routed as usual. */
 function navMenuRouted() {
   const d = navMenu;
   const entry = navEntry();
@@ -6134,14 +6135,20 @@ function navMenuRouted() {
     finishNavMenu(d);
     return own;
   }
-  if (navStepTimer != null && !entry) { clearTimeout(navStepTimer); navStepTimer = null; return true; }
-  if (!entry) return false;
+  if (!entry) {
+    if (navStepTimer != null) { clearTimeout(navStepTimer); navStepTimer = null; }
+    return false;
+  }
   if (!navSpent.has(entry.navMenu) && entry.view === currentViewKey() && !fxMedia(NAV_WIDE) && !tqDrawer) {
     const p = navMenuParts();
     if (p) { mountNavMenu(p, entry.navMenu, true); return true; }
   }
   // Its opening is over (a row took the member on, or another page is showing now): step
-  // back off it to the page showing, which isn't routed again.
+  // back off it, and route where that lands as any Back is. After a Forward, that is the
+  // page showing, drawn again in place (no new page, so no page_view). After a Back (the
+  // address changed while the drawer showed: edited, or a link opened into the app) it is
+  // the page behind, which must show; left unrouted, the address named it and the screen
+  // stayed on the page Back had left (review, 2026-11-13).
   if (navStepTimer == null) {
     navStepTimer = setTimeout(() => { navStepTimer = null; }, TQ_BACK_GRACE_MS);
     try { history.back(); } catch {}
