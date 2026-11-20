@@ -18,7 +18,7 @@
 /* ---------- Page transitions (View Transitions API) ----------
    app.js sets html[data-fx-nav] for the length of a transition:
      fwd / back  a tab change, sliding the way the tab bar reads
-     open        a team / game page / Draft HQ opening over its tab
+     open        a team / game page opening over its tab
      close       that page closing again (Back, the browser's back, its tab)
    and html[data-fx-morph] (team | game) while a tapped logo or card morphs into the
    opened page's header: fx-hero is the card / header, fx-logo-a / -b its logos. */

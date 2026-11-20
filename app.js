@@ -2094,7 +2094,7 @@ function focusQuietly(node) {
 /* Whether the drawer shows: the Trade tab with its drawer open, no page over it, and a
    queue in this site.json. */
 function tradeQueueDrawerDue() {
-  return Boolean(DATA) && viewTradeQueue && activeTab === "trade" && viewTeamId == null && viewGameId == null && !viewDraftHq && tradeQueueTrades() !== null;
+  return Boolean(DATA) && viewTradeQueue && activeTab === "trade" && viewTeamId == null && viewGameId == null && tradeQueueTrades() !== null;
 }
 
 function syncTradeQueueDrawer() {
@@ -3748,7 +3748,12 @@ function renderTeam(view, teamId) {
   view.appendChild(el("div", "news-disclaimer", "Full attributes, contracts, and every rating are in the CSV export above."));
 }
 
-/* ---------- Draft HQ ---------- */
+/* ---------- Draft tab ----------
+   Cory, 2026-11-14: "add a draft order page, and then a draft grade". The tab took over
+   Draft HQ, which was a page behind a button on Teams (#draft still opens it): the next
+   draft's order first, then the last draft's grades and every pick once a class has been
+   drafted, then the league's needs, the best free agents and the pick value chart.
+   site.json's draft comes from src/discord/siteExport.ts (buildSiteDraft). */
 
 const DRAFT_GROUP_POS = {
   QB: ["QB"], RB: ["HB", "FB"], WR: ["WR"], TE: ["TE"],
@@ -3756,7 +3761,7 @@ const DRAFT_GROUP_POS = {
   LB: ["SAM", "WILL", "MIKE"], CB: ["CB"], S: ["FS", "SS"], Specialists: ["K", "P", "LS"],
 };
 const DRAFT_GROUPS = Object.keys(DRAFT_GROUP_POS);
-const hqState = { faGroup: "", pickRound: 1, pickSlot: "", pickYear: 0, classRound: "" };
+const hqState = { faGroup: "", pickRound: 1, pickSlot: "", pickYear: 0, classRound: "", orderRound: 1, gradeTeam: "", resultRound: "1", focusTile: "", tileTop: 0, focusPill: "" };
 
 function bestFreeAgentsFor(group, limit) {
   let positions = DRAFT_GROUP_POS[group] ?? (group === "LS" ? ["LS"] : null);
@@ -3899,22 +3904,351 @@ function renderDraftClass(view) {
   table.appendChild(tbody);
   wrap.appendChild(table);
   view.appendChild(wrap);
-  // The reveal plays when the class is first shown (arriving on Draft HQ, or a new round
-  // picked), never on the page's other re-renders (the pick calculator, the FA pills).
-  const fresh = lastRenderedTab !== "draft-hq" || fxDraft.round !== hqState.classRound;
-  fxDraft.round = hqState.classRound;
+  // The reveal plays when the class is first shown (arriving on the Draft tab, or a new
+  // round picked), never on the page's other re-renders (the pick calculator, the FA pills).
+  const fresh = lastRenderedTab !== "draft" || fxDraft.round !== "class-" + hqState.classRound;
+  fxDraft.round = "class-" + hqState.classRound;
   if (fresh) fxRevealDraft(wrap, rows, shown);
 }
 
-function renderDraftHq(view) {
-  const back = el("button", "team-back", "← Back");
-  back.type = "button";
-  back.addEventListener("click", () => { viewDraftHq = false; try { history.pushState(null, "", tabUrl(activeTab)); } catch {} render(); });
-  view.appendChild(back);
+/* ---------- Draft tab: order ---------- */
 
-  view.appendChild(sectionHead("Draft HQ", "the whole league's draft picture"));
+const DRAFT_GROUP_TEXT = {
+  missed: "Missed the playoffs", playoffSpot: "In a playoff spot",
+  wildCard: "Lost in the Wild Card round", divisional: "Lost in the Divisional round",
+  conference: "Lost the conference title game", superBowl: "Lost the Super Bowl",
+  champion: "Won the Super Bowl", alive: "Still playing", out: "Out of the playoffs",
+};
 
-  renderDraftClass(view);
+function teamByAbbr(abbr) {
+  return (DATA.teams || []).find((t) => t.abbr === abbr) || null;
+}
+
+function slotRecord(s) {
+  return s.ties ? `${s.wins}-${s.losses}-${s.ties}` : `${s.wins}-${s.losses}`;
+}
+
+/* "Nov 22" from the pick owners' "2026-11-22": a calendar date, read on the local calendar
+   (shortDate below reads a moment, which puts a bare date at UTC midnight, the day before
+   anywhere west of Greenwich). */
+function calendarDate(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ""));
+  if (!m) return String(ymd || "");
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/* How settled the order is: a projection (in the week being played), the picks set so far,
+   or final; and how many picks are tied, which Madden settles. */
+function draftOrderSub(order) {
+  const tied = order.slots.filter((s) => s.tie).length;
+  const ties = tied ? ` · ${tied} tied` : "";
+  if (order.phase === "regular") return `projected · ${order.week}${ties}`;
+  if (order.phase === "final") return `final${ties}`;
+  let set = 0;
+  for (const s of order.slots) {
+    if (s.first !== s.last || s.first !== set + 1) break;
+    set++;
+  }
+  return (set ? `picks 1–${set} set` : "filling in") + ties;
+}
+
+/* "Round 1 2 3 … 7", with "All" after them when `all` is given: numbers, so seven rounds
+   fit one row on a phone. Added to `view`; the button pressed keeps the keyboard's focus
+   through the redraw its press causes (`scope` tells the order's from the results'). */
+function roundPills(view, scope, rounds, current, pick, all) {
+  const pills = el("div", "week-pills round-pills");
+  pills.appendChild(el("span", "round-pills-label", "Round"));
+  let refocus = null;
+  for (const [key, label] of [...rounds.map((r) => [r, String(r)]), ...(all ? [[all, "All"]] : [])]) {
+    const on = current === key;
+    const pill = el("button", "week-pill" + (on ? " active" : ""), label);
+    pill.type = "button";
+    pill.setAttribute("aria-pressed", String(on));
+    if (label !== "All") pill.setAttribute("aria-label", "Round " + label);
+    pill.addEventListener("click", () => { hqState.focusPill = scope + ":" + key; pick(key); });
+    if (hqState.focusPill === scope + ":" + key) refocus = pill;
+    pills.appendChild(pill);
+  }
+  view.appendChild(pills);
+  if (refocus) {
+    hqState.focusPill = "";
+    try { refocus.focus({ preventScroll: true }); } catch {}
+  }
+}
+
+/* A team's two most pressing needs right now (the needs engine's HIGH and MEDIUM). */
+function topNeeds(teamId) {
+  return ((DATA.needs && DATA.needs[String(teamId)]) || []).filter((n) => n.level === "HIGH" || n.level === "MEDIUM").slice(0, 2);
+}
+
+/* The next draft's order: one row per pick, teams that missed the playoffs first, then the
+   playoff teams in the round they went out. A pick still filling in shows its whole span
+   ("19–24"). With the league's traded picks (photographed from Madden), the rounds get
+   pills and each row shows the pick's owner, "from" the team whose record earned it;
+   without them every round runs as round 1 does. */
+function renderDraftOrder(view) {
+  const order = DATA.draft && DATA.draft.order;
+  if (!order || !(order.slots || []).length) return;
+  view.appendChild(sectionHead(`${order.draftYear} Draft Order`, draftOrderSub(order)));
+  // Rounds differ only where picks were traded; Madden's draft has seven.
+  const traded = order.slots.some((s) => (s.traded || []).length > 0);
+  if (traded) {
+    if (hqState.orderRound > 7) hqState.orderRound = 1;
+    roundPills(view, "order", [1, 2, 3, 4, 5, 6, 7], hqState.orderRound, (r) => { hqState.orderRound = r; render(); });
+  }
+  const round = traded ? hqState.orderRound : 1;
+  const card = el("div", "card draft-order");
+  let prevMissed = null;
+  for (const s of order.slots) {
+    const missed = s.group === "missed";
+    if (prevMissed === true && !missed) card.appendChild(el("div", "do-divider", order.phase === "regular" ? "Playoff spots" : "Playoff teams · in the order they go out"));
+    prevMissed = missed;
+    const trade = traded ? (s.traded || []).find((t) => t.round === round) : null;
+    const ownerAbbr = trade ? trade.to : s.team;
+    const owner = teamByAbbr(ownerAbbr);
+    const earner = teamByAbbr(s.team);
+    // A row opens its team's page; one whose team the site doesn't have is plain text.
+    const row = el(owner ? "button" : "div", "do-row");
+    if (owner) {
+      row.type = "button";
+      row.addEventListener("click", () => openTeam(owner.teamId));
+    }
+    row.appendChild(el("span", "do-pick" + (s.first === s.last ? "" : " do-pick-range"), s.first === s.last ? String(s.first) : `${s.first}–${s.last}`));
+    row.appendChild(logoImg(ownerAbbr, "hist-logo"));
+    const who = el("div", "wire-who");
+    who.appendChild(el("div", "wire-name", owner ? owner.nick : ownerAbbr));
+    const sub = [trade ? `from ${earner ? earner.nick : s.team}, ${slotRecord(s)}` : slotRecord(s), DRAFT_GROUP_TEXT[s.group] || ""];
+    if (s.tie) sub.push(s.tieUnmeasured ? "tied on record, schedule not on hand" : "tied on record and schedule");
+    who.appendChild(el("div", "wire-sub", sub.filter(Boolean).join(" · ")));
+    row.appendChild(who);
+    const needs = owner ? topNeeds(owner.teamId) : [];
+    if (needs.length) {
+      const wrap = el("span", "do-needs");
+      wrap.setAttribute("aria-label", "Top needs: " + needs.map((n) => n.short).join(", "));
+      for (const n of needs) wrap.appendChild(el("span", "need-level lv-" + n.level.toLowerCase(), n.short));
+      row.appendChild(wrap);
+    }
+    card.appendChild(row);
+  }
+  view.appendChild(card);
+  const asOf = order.tradesAsOf ? ` as of ${calendarDate(order.tradesAsOf)}` : "";
+  const unmatched = order.tradesUnmatched || 0;
+  const lost = unmatched ? ` ${unmatched} traded pick${unmatched === 1 ? "" : "s"} there couldn't be matched to a team in this league and ${unmatched === 1 ? "isn't" : "aren't"} shown.` : "";
+  const trades = traded
+    ? `Traded picks are from Madden's Draft Picks screens${asOf}; a trade made since then isn't shown yet.${lost}`
+    : unmatched
+      ? `Every round runs in this order here: the traded picks on Madden's Draft Picks screens${asOf} couldn't be matched to teams in this league, so none are shown.`
+      : order.tradesAsOf
+        ? `Every round runs in this order: no picks had been traded on Madden's Draft Picks screens${asOf}.`
+        : "Every round runs in this order. Picks traded in Madden aren't in EA's data, so each pick shows the team whose record earned it.";
+  view.appendChild(el("div", "news-disclaimer", "Madden's order: teams that missed the playoffs pick first, worst record first, then the playoff teams in the round they went out, the champion last. A tie on record goes to the easier schedule (opponents' combined record); \"tied\" means nothing on hand separates them (level on both, or a schedule not on hand), and Madden settles it. " + trades + " The tags are each team's top needs right now."));
+}
+
+/* ---------- Draft tab: grades ---------- */
+
+function gradePill(letter, extra) {
+  return el("span", "grade-pill grade-" + String(letter || "c")[0].toLowerCase() + (extra ? " " + extra : ""), letter || "—");
+}
+
+function pickSlot(p) {
+  return `${p.round}.${String(p.pick).padStart(2, "0")}`;
+}
+
+function ordinalWord(n) {
+  const v = n % 100;
+  return n + (v >= 11 && v <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th");
+}
+
+/* One part of a team's grade as a bar either side of the league's average. */
+function gradePart(label, value, note) {
+  const row = el("div", "gd-part");
+  row.appendChild(el("span", "gd-label", label));
+  const bar = el("span", "gd-bar");
+  const fill = el("span", "gd-fill " + (value >= 0 ? "gd-up" : "gd-down"));
+  fill.style.width = Math.min(50, (Math.abs(value) / 4) * 50) + "%";
+  bar.appendChild(fill);
+  row.appendChild(bar);
+  row.appendChild(el("span", "gd-val", (value > 0 ? "+" : value < 0 ? "−" : "") + Math.abs(value).toFixed(1)));
+  row.appendChild(el("span", "gd-note", note));
+  return row;
+}
+
+function gradeDetail(g, t) {
+  const tm = teamByAbbr(t.team);
+  const card = el("div", "card grade-detail");
+  const head = el("div", "gd-head");
+  head.appendChild(logoImg(t.team, "gd-logo"));
+  const who = el("div", "gd-who");
+  who.appendChild(el("div", "gd-name", tm ? [tm.city, tm.nick].filter(Boolean).join(" ") : t.team));
+  who.appendChild(el("div", "gd-sub", `${ordinalWord(t.rank)} of ${g.teams.length} · ${t.picks} pick${t.picks === 1 ? "" : "s"}`));
+  head.appendChild(who);
+  head.appendChild(gradePill(t.grade, "gd-letter"));
+  card.appendChild(head);
+  card.appendChild(gradePart("Value", t.value, "talent against the slot each pick came from"));
+  card.appendChild(gradePart("Fit", t.fit, "needs filled and day-one starters"));
+  card.appendChild(gradePart("Haul", t.haul, "draft capital used"));
+  const facts = [];
+  if (t.highNeeds.length) facts.push("High needs: " + t.highNeeds.map((n) => n + (t.highNeedsFilled.includes(n) ? " ✓" : " ✗")).join(" · "));
+  else facts.push("No high needs going in");
+  facts.push(`${t.dayOneStarters} day-one starter${t.dayOneStarters === 1 ? "" : "s"} · ${t.steals} steal${t.steals === 1 ? "" : "s"} · ${t.reaches} reach${t.reaches === 1 ? "" : "es"}`);
+  const best = g.picks.find((p) => p.overall === t.best);
+  const worst = t.picks > 1 ? g.picks.find((p) => p.overall === t.worst) : null;
+  if (best) facts.push(`Best pick: ${pickSlot(best)} ${best.name}, ${best.pos} (${best.grade})`);
+  if (worst) facts.push(`Weakest: ${pickSlot(worst)} ${worst.name}, ${worst.pos} (${worst.grade})`);
+  const list = el("div", "gd-facts");
+  for (const f of facts) list.appendChild(el("div", null, f));
+  card.appendChild(list);
+  return card;
+}
+
+/* Every pick of the graded draft, by round (the flip reveal plays as the Draft Class's did),
+   or one team's whole class, in its breakdown. */
+function renderDraftResults(view, g, sel) {
+  const picks = g.picks || [];
+  const rounds = [...new Set(picks.map((p) => p.round))].sort((a, b) => a - b);
+  if (!sel) {
+    if (hqState.resultRound !== "all" && !rounds.includes(Number(hqState.resultRound))) hqState.resultRound = rounds.length ? String(rounds[0]) : "all";
+    roundPills(view, "results", rounds.map(String), hqState.resultRound, (key) => { hqState.resultRound = key; render(); }, "all");
+  }
+  const shown = sel ? picks.filter((p) => p.team === sel.team) : hqState.resultRound === "all" ? picks : picks.filter((p) => String(p.round) === hqState.resultRound);
+  const wrap = el("div", "card table-wrap");
+  const table = el("table", "roster-table draft-class draft-results");
+  const thead = el("thead");
+  const hr = el("tr");
+  // Dev rides in the player cell, so Pick · Team · Player · OVR · Grade fit a 375px phone.
+  for (const h of ["Pick", "Team", "Player", "OVR", "Grade", "College"]) hr.appendChild(el("th", null, h));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  const rows = [];
+  for (const p of shown) {
+    const tr = el("tr");
+    rows.push(tr);
+    tr.appendChild(el("td", null, pickSlot(p)));
+    const teamTd = el("td", null, p.team);
+    if (p.from) teamTd.appendChild(el("span", "dr-from", "from " + p.from));
+    tr.appendChild(teamTd);
+    const open = () => {
+      if (playerById(p.id)) openPlayerCard(p.id);
+      else { const t = teamByAbbr(p.team); if (t) openTeam(t.teamId); }
+    };
+    // The name is the row's button, so a keyboard reaches every pick; a tap anywhere on the row works too.
+    const nameTd = el("td", "dc-player");
+    const nameBtn = el("button", "dr-name", p.name);
+    nameBtn.type = "button";
+    nameBtn.addEventListener("click", (e) => { e.stopPropagation(); open(); });
+    nameTd.appendChild(nameBtn);
+    nameTd.appendChild(el("span", "dc-pos", p.pos));
+    nameTd.appendChild(el("span", "dev-badge dev-" + (p.dev || "Normal").toLowerCase().replace(/[^a-z]/g, ""), p.dev || "—"));
+    const tags = [];
+    if (p.startsDayOne) tags.push("starts day one");
+    if (p.needLevel === "HIGH" || p.needLevel === "MEDIUM") tags.push(p.needLevel === "HIGH" ? "high need" : "medium need");
+    if (tags.length) nameTd.appendChild(el("span", "dc-tags", tags.join(" · ")));
+    tr.appendChild(nameTd);
+    tr.appendChild(el("td", null, String(p.ovr)));
+    const gradeTd = el("td", "dr-grade");
+    gradeTd.appendChild(gradePill(p.grade));
+    if (p.tag) gradeTd.appendChild(el("span", "dr-tag dr-" + p.tag, p.tag === "steal" ? "Steal" : "Reach"));
+    tr.appendChild(gradeTd);
+    tr.appendChild(el("td", null, p.college || "—"));
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", open);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  view.appendChild(wrap);
+  if (sel) return; // a team's picks open with its breakdown: no reveal there
+  const key = "results-" + hqState.resultRound;
+  const fresh = lastRenderedTab !== "draft" || fxDraft.round !== key;
+  fxDraft.round = key;
+  if (fresh) fxRevealDraft(wrap, rows, shown);
+}
+
+/* The last draft's grades: every class as a tile in grade order. Tapping one opens its
+   breakdown (Value, Fit, Haul) and its picks right under that tile's row, so it's in view
+   on a phone; tapping it again closes it. The breakdown goes after the row's last tile in
+   the page too, so the keyboard's Tab order is the order on screen, and the tapped tile
+   stays where it was on screen through the redraw, however tall the breakdown it closed.
+   Below the board, every pick by round. */
+function renderDraftGrades(view) {
+  const g = DATA.draft && DATA.draft.grades;
+  if (!g || !(g.teams || []).length) return false;
+  view.appendChild(sectionHead(`${g.draftYear} Draft Grades`, "tap a team for its breakdown"));
+  if (hqState.gradeTeam && !g.teams.some((t) => t.team === hqState.gradeTeam)) hqState.gradeTeam = "";
+  const board = el("div", "grade-board");
+  let refocus = null;
+  let panel = null;
+  const tiles = [];
+  for (const t of g.teams) {
+    const tm = teamByAbbr(t.team);
+    const on = hqState.gradeTeam === t.team;
+    const tile = el("button", "grade-tile" + (on ? " active" : ""));
+    tile.type = "button";
+    tile.setAttribute("aria-pressed", String(on));
+    tile.style.setProperty("--tc", railColor(t.team));
+    tile.appendChild(logoImg(t.team, "grade-tile-logo"));
+    const who = el("span", "grade-tile-who");
+    who.appendChild(el("span", "grade-tile-nick", tm ? tm.nick : t.team));
+    who.appendChild(el("span", "grade-tile-sub", `${t.picks} pick${t.picks === 1 ? "" : "s"}`));
+    tile.appendChild(who);
+    tile.appendChild(gradePill(t.grade, "grade-tile-letter"));
+    tile.addEventListener("click", () => {
+      hqState.gradeTeam = on ? "" : t.team;
+      hqState.focusTile = t.team;
+      hqState.tileTop = layoutTop(tile);
+      render();
+    });
+    tiles.push(tile);
+    if (on) {
+      panel = el("div", "grade-panel");
+      panel.appendChild(gradeDetail(g, t));
+      renderDraftResults(panel, g, t);
+    }
+    if (hqState.focusTile === t.team) refocus = tile;
+  }
+  // Four across on a desktop, two on a phone (styles.css): the breakdown after its row.
+  const cols = window.matchMedia && window.matchMedia("(min-width: 900px)").matches ? 4 : 2;
+  const selected = g.teams.findIndex((t) => t.team === hqState.gradeTeam);
+  const after = selected < 0 ? -1 : Math.min(Math.ceil((selected + 1) / cols) * cols, tiles.length) - 1;
+  tiles.forEach((tile, i) => { board.appendChild(tile); if (i === after && panel) board.appendChild(panel); });
+  view.appendChild(board);
+  // The tapped tile keeps the keyboard's focus (only once it's in the page: a browser ignores
+  // focus on an element that isn't) and its place on screen (renderView, renderAnchor).
+  hqState.focusTile = "";
+  if (refocus) {
+    renderAnchor = { el: refocus, top: hqState.tileTop };
+    try { refocus.focus({ preventScroll: true }); } catch {}
+  }
+  view.appendChild(sectionHead(`${g.draftYear} Draft Results`, "every pick, graded"));
+  renderDraftResults(view, g, null);
+  view.appendChild(el("div", "news-disclaimer", "Our own grade, not EA's. Each pick scores Value: his rating, dev trait and age against what that slot returned in this class, plus what his position is worth (most at the top of the draft). Need: a pick where the team had a high or medium need before the draft. Starter: he'd start day one. A class averages its picks, the early ones counting most, plus Haul: the draft capital it used against the league's average class. Steal and Reach mark picks three points above or below their slot. Graded once, when the class arrived."));
+  return true;
+}
+
+/* An element's top on screen as laid out, not as drawn: the entry animation (styles.css
+   "rise") draws a freshly rendered page 6px low for a moment, and the grade tile's anchor
+   must not read that as the tile moving. */
+function layoutTop(node) {
+  let y = 0;
+  for (let n = node; n; n = n.offsetParent) y += n.offsetTop || 0;
+  return y - (window.scrollY || 0);
+}
+
+/* A grade breakdown sits after its row's last tile for the width it was drawn at (four
+   across from 900px, two below): drawn again when the window crosses that width, as an
+   iPad turning to portrait does. */
+try {
+  const wide = window.matchMedia && window.matchMedia("(min-width: 900px)");
+  if (wide && typeof wide.addEventListener === "function") {
+    wide.addEventListener("change", () => { if (DATA && activeTab === "draft" && viewTeamId == null && viewGameId == null && hqState.gradeTeam) render(); });
+  }
+} catch {}
+
+function renderDraft(view) {
+  renderDraftOrder(view);
+  // Once this league has drafted a class, its graded picks replace the plain class list.
+  if (!renderDraftGrades(view)) renderDraftClass(view);
 
   // --- League needs matrix ---
   view.appendChild(sectionHead("League Needs", "tap a team for its full board"));
@@ -4315,10 +4649,6 @@ function renderFreeAgents(view) {
 /* ---------- Teams directory ---------- */
 
 function renderTeams(view) {
-  const hqBtn = el("button", "trade-cta hq-btn", "🏈 DRAFT HQ — league needs · best available · pick values");
-  hqBtn.type = "button";
-  hqBtn.addEventListener("click", openDraftHq);
-  view.appendChild(hqBtn);
   view.appendChild(sectionHead("Teams", "tap a team for roster, results & CSV"));
   const grid = el("div", "teams-grid");
   const sorted = [...(DATA.teams || [])].sort((a, b) => a.nick.localeCompare(b.nick));
@@ -5580,7 +5910,7 @@ function revealHelpSection() {
    ignored; checked 2026-11-14 in Chrome against the live property, where even Google's own
    snippet with it, and a tag with no config at all, sent one), so this script doesn't count
    that page again (the live site's first visits each counted twice). It counts every page
-   after it: each tab tapped, each team page, game page, Draft HQ or Trade Queue opened or
+   after it: each tab tapped, each team page, game page or Trade Queue opened or
    closed, and each Back / Forward that lands on another page. Never for a page drawn again in place (a
    sort, a trade-builder tap, a Trade Queue check): render() runs for those too, so a page
    is counted when its key changes, not when it is drawn. page_title names the page: a tab
@@ -5632,7 +5962,6 @@ function startVisitCounting(data) {
 
 /* The page showing, as a key (a new key is a new page) and the title GA reports it by. */
 function visitPage() {
-  if (viewDraftHq) return { key: "draft-hq", title: "Draft HQ" };
   if (viewTeamId != null) {
     const t = teamIndex.get(viewTeamId);
     const name = t ? [t.city, t.nick].filter(Boolean).join(" ") : "";
@@ -5666,19 +5995,20 @@ function visitNote() {
 
 /* ---------- App shell ---------- */
 
-const RENDERERS = { home: renderHome, teams: renderTeams, players: renderPlayers, freeagents: renderFreeAgents, standings: renderStandings, rankings: renderRankings, leaders: renderLeaders, updates: renderUpdates, transactions: renderTransactions, news: renderNews, rules: renderRules, trade: renderTrade, help: renderHelp };
+const RENDERERS = { home: renderHome, teams: renderTeams, players: renderPlayers, freeagents: renderFreeAgents, draft: renderDraft, standings: renderStandings, rankings: renderRankings, leaders: renderLeaders, updates: renderUpdates, transactions: renderTransactions, news: renderNews, rules: renderRules, trade: renderTrade, help: renderHelp };
 let activeTab = "home";
 let lastRenderedTab = null;
 let viewTeamId = null; // non-null = the team detail page is open over the current tab
-let viewDraftHq = false; // the league-wide Draft HQ page
 let viewGameId = null; // non-null = a game page (#game-<scheduleId>) is open over the current tab
 let viewRuleId = null; // a #rules-<id> link's section, scrolled to once the Rules tab is drawn
 let tabBeforeRules = "home"; // the tab showing before the Rules tab took over, for Back off a #rules link
 let viewHelpId = null; // a #help-<id> link's item, opened and scrolled to once the Help tab is drawn
 let tabBeforeHelp = "home"; // the tab showing before the Help tab took over, for Back off a #help link
-let viewTradeQueue = false; // the Trade tab's Trade Queue drawer is open (#trade-queue); kept under a team / game page or Draft HQ over the tab
+let tabBeforeDraft = "home"; // the tab showing before the Draft tab took over, for Back off a #draft link
+let viewTradeQueue = false; // the Trade tab's Trade Queue drawer is open (#trade-queue); kept under a team / game page over the tab
 let tabBeforeTradeQueue = null; // the tab a #trade-queue link took the Trade tab over from, for Back off it; null while the Trade tab is the member's own pick
 let routedYet = false; // the first route (the address the page loaded on) is behind us
+let renderAnchor = null; // { el, top }: an element to keep where it was on screen through this redraw (the Draft tab's tapped grade tile)
 const teamSort = { col: "ovr", dir: -1 }; // roster table sort state, survives re-renders
 const needsView = { sort: "need", open: null }; // draft board: sort mode + which group is expanded
 let scoreWeek = null; // "stage-week" key of a past week being browsed on Home, null = current week
@@ -5688,9 +6018,6 @@ function openTeam(teamId) {
   const from = currentViewKey();
   viewTeamId = teamId;
   viewGameId = null;
-  // Draft HQ's rows open a team page too; left set, it outranked the team in render()
-  // and the tap only changed the URL.
-  viewDraftHq = false;
   needsView.open = null;
   try { history.pushState({ team: teamId }, "", "#team-" + teamId); } catch {}
   fxOpen("team", from, render);
@@ -5701,18 +6028,10 @@ function closeTeam(viaHistory) {
   if (!viaHistory) { try { history.pushState(null, "", tabUrl(activeTab)); } catch {} }
   fxClose(from, render);
 }
-function openDraftHq() {
-  viewDraftHq = true;
-  viewTeamId = null;
-  viewGameId = null;
-  try { history.pushState({ draft: true }, "", "#draft"); } catch {}
-  fxGo("open", render);
-}
 function openGame(scheduleId) {
   const from = currentViewKey();
   viewGameId = scheduleId;
   viewTeamId = null;
-  viewDraftHq = false;
   try { history.pushState({ game: scheduleId }, "", "#game-" + scheduleId); } catch {}
   fxOpen("game", from, render);
 }
@@ -5722,17 +6041,18 @@ function closeGame(viaHistory) {
   if (!viaHistory) { try { history.pushState(null, "", tabUrl(activeTab)); } catch {} }
   fxClose(from, render);
 }
-/* The page a URL fragment names: #team-<id>, #game-<scheduleId> (the link the Discord
-   matchup breakdown posts), or #draft; or the tab, #rules / #rules-<id> (the links bot
-   posts put where arguments start), #help / #help-<id> (the how-to) or #trade-queue (the
-   Trade tab with its Trade Queue drawer open). Read on load and on every back / forward. */
+/* The page a URL fragment names: #team-<id> or #game-<scheduleId> (the link the Discord
+   matchup breakdown posts); or the tab, #rules / #rules-<id> (the links bot posts put
+   where arguments start), #help / #help-<id> (the how-to), #trade-queue (the Trade tab
+   with its Trade Queue drawer open) or #draft (the Draft tab, Draft HQ's old address).
+   Read on load and on every back / forward. */
 function routeFromHash() {
   const hash = location.hash || "";
   const team = hash.match(/^#team-(\d+)$/);
   const game = hash.match(/^#game-(\d+)$/);
   viewTeamId = team ? Number(team[1]) : null;
   viewGameId = game ? Number(game[1]) : null;
-  viewDraftHq = hash === "#draft";
+  const draft = hash === "#draft";
   const rules = rulesRoute(hash);
   const help = helpRoute(hash);
   const queue = hash === "#trade-queue";
@@ -5743,7 +6063,7 @@ function routeFromHash() {
   // The drawer is the Trade tab's: a page over the tab keeps it for when the page closes
   // (a team page opened from a player in it); any other address closes it, and
   // #trade-queue opens it again below.
-  if (!team && !game && !viewDraftHq) viewTradeQueue = false;
+  if (!team && !game) viewTradeQueue = false;
   if (rules) {
     // A league without rules has no Rules tab: its link opens Home.
     if (!hasRules()) { activeTab = "home"; return; }
@@ -5774,13 +6094,21 @@ function routeFromHash() {
     if (!tradeQueueEntryKind()) {
       try { history.replaceState({ tradeQueue: loading ? "loaded" : "followed" }, "", location.pathname + location.search + hash); } catch {}
     }
-  } else if (activeTab === "rules" && !team && !game && !viewDraftHq) {
+  } else if (draft) {
+    // Draft HQ's old address, now the Draft tab's own: a link like #rules, so the tab before
+    // is the one under any link already showing (and on the Draft tab, the one under it stays).
+    tabBeforeDraft = tabUnderLinks();
+    activeTab = "draft";
+  } else if (activeTab === "draft" && !team && !game) {
+    // Back off a #draft link onto the bare address: the tab that was showing before it.
+    activeTab = tabBeforeDraft;
+  } else if (activeTab === "rules" && !team && !game) {
     // Back off a #rules link onto the bare address: the tab that was showing before it.
     activeTab = tabBeforeRules;
-  } else if (activeTab === "help" && !team && !game && !viewDraftHq) {
+  } else if (activeTab === "help" && !team && !game) {
     // Back off a #help link onto the bare address, the same way.
     activeTab = tabBeforeHelp;
-  } else if (activeTab === "trade" && tabBeforeTradeQueue !== null && !team && !game && !viewDraftHq) {
+  } else if (activeTab === "trade" && tabBeforeTradeQueue !== null && !team && !game) {
     // Back off a #trade-queue link onto the bare address, the same way.
     activeTab = tabBeforeTradeQueue;
     tabBeforeTradeQueue = null;
@@ -5792,6 +6120,7 @@ function routeFromHash() {
 function tabUnderLinks() {
   if (activeTab === "rules") return tabBeforeRules;
   if (activeTab === "help") return tabBeforeHelp;
+  if (activeTab === "draft") return tabBeforeDraft;
   if (activeTab === "trade" && tabBeforeTradeQueue !== null) return tabBeforeTradeQueue;
   return activeTab;
 }
@@ -5812,17 +6141,18 @@ function followLink(hash) {
   routeChanged();
 }
 
-/* The address a tab lives at: #rules for the Rules tab and #help for the Help tab, so
-   their links can be shared and a reload stays on them; #trade-queue for the Trade tab with
+/* The address a tab lives at: #rules for the Rules tab, #help for the Help tab and #draft
+   for the Draft tab, so their links can be shared (the draft order, posted where the league
+   talks) and a reload stays on them; #trade-queue for the Trade tab with
    its drawer open, so closing a page over it opens the drawer again; the bare page for every
    other tab, as it always was. */
 function tabUrl(name) {
-  return location.pathname + location.search + (name === "rules" ? "#rules" : name === "help" ? "#help" : name === "trade" && viewTradeQueue ? "#trade-queue" : "");
+  return location.pathname + location.search + (name === "rules" ? "#rules" : name === "help" ? "#help" : name === "draft" ? "#draft" : name === "trade" && viewTradeQueue ? "#trade-queue" : "");
 }
 
-/* Which page is showing: a tab's name, or "team-<id>" / "game-<id>" / "draft-hq". */
+/* Which page is showing: a tab's name, or "team-<id>" / "game-<id>". */
 function currentViewKey() {
-  return viewDraftHq ? "draft-hq" : viewTeamId != null ? "team-" + viewTeamId : viewGameId != null ? "game-" + viewGameId : activeTab;
+  return viewTeamId != null ? "team-" + viewTeamId : viewGameId != null ? "game-" + viewGameId : activeTab;
 }
 
 function render() {
@@ -5843,21 +6173,29 @@ function renderView() {
   const y = window.scrollY;
   view.replaceChildren();
   if (!DATA) { view.appendChild(el("div", "loading", "Loading league data…")); return; }
-  if (viewDraftHq) { renderDraftHq(view); lastRenderedTab = viewKey; window.scrollTo(0, keepScroll ? y : 0); return; }
   if (viewTeamId != null) { renderTeam(view, viewTeamId); lastRenderedTab = viewKey; window.scrollTo(0, keepScroll ? y : 0); return; }
   if (viewGameId != null) { renderGame(view, viewGameId); lastRenderedTab = viewKey; window.scrollTo(0, keepScroll ? y : 0); return; }
+  renderAnchor = null;
   RENDERERS[activeTab](view);
   lastRenderedTab = viewKey;
   // Re-rendering the SAME view (the trade builder does this on every tap) keeps the
   // scroll position; switching views starts at the top like a page change should.
   window.scrollTo(0, keepScroll ? y : 0);
+  // …unless the page asked to keep one element in place: content above it can have changed
+  // height (a grade breakdown closing above the tile just tapped).
+  if (renderAnchor) {
+    const a = renderAnchor;
+    renderAnchor = null;
+    const moved = layoutTop(a.el) - a.top;
+    if (keepScroll && moved && typeof window.scrollBy === "function") window.scrollBy(0, moved);
+  }
   // A #rules-<id> link then lands on its section, a #help-<id> link on its item.
   if (activeTab === "rules") revealRuleSection();
   if (activeTab === "help") revealHelpSection();
 }
 
 /* Switching tabs, from the tab bar or from a link inside a page (the home wire's "All
-   transactions →"). Either way an open team page, game page or Draft HQ closes, the way the bar
+   transactions →"). Either way an open team page or game page closes, the way the bar
    always did. On narrow phones the bar scrolls sideways (eleven tabs, twelve with Rules,
    thirteen with Help too), so the tab switched to is scrolled into view: a link must never
    land on a tab the bar hides. */
@@ -5865,7 +6203,6 @@ function showTab(name) {
   const from = currentViewKey(), fromTab = activeTab;
   viewTeamId = null;
   viewGameId = null;
-  viewDraftHq = false;
   viewRuleId = null; // a section link not drawn yet is dropped, never kept for a later visit
   viewHelpId = null; // and so is a Help item's
   viewTradeQueue = false; // a tab tapped closes the Trade Queue drawer (from a page over it: the drawer covers the bar)
@@ -5876,6 +6213,7 @@ function showTab(name) {
   try { history.replaceState(null, "", tabUrl(name)); } catch {}
   if (name === "rules") tabBeforeRules = under; // Rules tapped again: the one under it stays
   if (name === "help") tabBeforeHelp = under;
+  if (name === "draft") tabBeforeDraft = under;
   activeTab = name;
   // The bar's highlight moves inside the transition, so the old frame still shows the old tab.
   const update = () => { markTab(name); render(); };
@@ -5924,7 +6262,7 @@ for (const btn of document.querySelectorAll(".tab")) {
    reached (inert); it slides only for a member who hasn't asked for less motion. It never
    opens by itself, and a phone turned wide enough for the desktop tabs closes it. */
 
-const NAV_NAMES = { home: "Home", teams: "Teams", players: "Players", freeagents: "Free Agents", standings: "Standings", rankings: "Power Rankings", leaders: "Leaders", updates: "Player Updates", transactions: "Moves", news: "News", rules: "Rules", trade: "Trade", help: "Help" };
+const NAV_NAMES = { home: "Home", teams: "Teams", players: "Players", freeagents: "Free Agents", draft: "Draft", standings: "Standings", rankings: "Power Rankings", leaders: "Leaders", updates: "Player Updates", transactions: "Moves", news: "News", rules: "Rules", trade: "Trade", help: "Help" };
 const NAV_WIDE = "(min-width: 900px)"; // the desktop tabs' width (styles.css): no drawer there
 const NAV_LEAVE_MS = 180; // the drawer's slide out, with motion (styles.css .nav-leaving)
 let navMenu = null; // while open: { token, url, pushed, closing, pending, onKey, inerted, timer }
@@ -5937,7 +6275,7 @@ let navLeaveTimer = null;
    taps; for a moment after either drawer shuts, the Menu button does (while one still
    shows, the Menu can't open anyway). And for that moment no tap reaches the page: once the
    drawer is shut its overlay takes no taps, so a double tap's second tap on the overlay or a
-   row would open whatever the new page has there (a team, Draft HQ, a search box's keyboard;
+   row would open whatever the new page has there (a team card, a search box's keyboard;
    review, 2026-11-13). The tab bar never did that: a second tap hit the same tab. */
 const NAV_TAP_HOLD_MS = 350;
 let navOpenHold = null; // timer while the Menu button, and the page, ignore taps
@@ -6399,7 +6737,7 @@ function fxClose(fromKey, update) {
 function fxHistory(fromKey, update) {
   const toKey = currentViewKey();
   if (fromKey === toKey || !fxCanTransition()) { update(); return null; }
-  const isPage = (k) => /^(team|game|draft)-/.test(k);
+  const isPage = (k) => /^(team|game)-/.test(k);
   const rec = fxLastOpen;
   if (isPage(fromKey)) return fxClose(fromKey, update);
   if (isPage(toKey)) {

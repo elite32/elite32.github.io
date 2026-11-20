@@ -836,7 +836,7 @@ a.card:active { background: var(--surface-2); }
 .dev-badge.dev-star { color: #8a6d00; background: rgba(184,134,11,.14); }
 .dev-badge.dev-superstar { color: #6b3fc9; background: rgba(123,79,208,.13); }
 .dev-badge.dev-xfactor { color: var(--red); background: rgba(208,10,16,.1); }
-/* Draft Class: the position as a small tag after the name (Draft HQ). */
+/* Draft Class and Draft Results: the position as a small tag after the name (Draft tab). */
 .dc-pos { margin-left: 6px; font-size: 11px; font-weight: 600; color: var(--text-dim); }
 /* Tighter cells and wrapping names, so Pick·Team·Player·OVR·Dev fit a 375px phone; College scrolls. */
 .draft-class th, .draft-class td { padding: 7px 6px; }
@@ -945,8 +945,93 @@ a.card:active { background: var(--surface-2); }
 .need-starter { margin-left: auto; font-size: 11.5px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .need-reason { margin-top: 4px; font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
 
-/* ---------- Draft HQ ---------- */
-.hq-btn { margin-bottom: 14px; text-align: center; }
+/* ---------- Draft tab (its needs matrix and pick calculator are below) ---------- */
+/* Draft Order: one row per pick. A pick still filling in ("19–24") sets smaller in the same column. */
+.do-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 14px; border: 0; border-bottom: 1px solid var(--edge);
+  background: none; font: inherit; font-size: 13px; color: inherit; text-align: left;
+}
+.do-row:last-child { border-bottom: 0; }
+/* Only a row that opens a team looks tappable (one the site doesn't know is a plain div). */
+button.do-row { cursor: pointer; }
+button.do-row:hover { background: var(--surface-2); }
+.do-row:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
+.do-pick {
+  flex: none; width: 38px; text-align: center;
+  font-family: "Archivo", sans-serif; font-weight: 900; font-size: 16px; font-variant-numeric: tabular-nums;
+}
+.do-pick-range { font-size: 11px; font-weight: 800; color: var(--text-dim); }
+.do-needs { margin-left: auto; flex: none; display: flex; gap: 4px; }
+.round-pills { align-items: center; }
+.round-pills .week-pill { min-width: 34px; padding: 6px 10px; text-align: center; }
+.round-pills-label {
+  margin-right: 2px; font-family: "Archivo", sans-serif; font-weight: 800; font-size: 10px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint);
+}
+.do-divider {
+  padding: 6px 14px; background: var(--surface-2); border-bottom: 1px solid var(--edge);
+  font-family: "Archivo", sans-serif; font-weight: 800; font-size: 9.5px;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint);
+}
+/* Grades: a letter, coloured by band (A green through F red). */
+.grade-pill {
+  display: inline-block; min-width: 28px; padding: 3px 6px; border-radius: 6px; text-align: center;
+  font-family: "Archivo", sans-serif; font-weight: 900; font-size: 12px; line-height: 1.2;
+  color: var(--text-dim); background: var(--surface-2);
+}
+.grade-pill.grade-a { color: #fff; background: var(--up); }
+.grade-pill.grade-b { color: #0d6b3b; background: rgba(18,138,77,.13); }
+.grade-pill.grade-c { color: #8a6d00; background: rgba(184,134,11,.16); }
+.grade-pill.grade-d { color: var(--down); background: rgba(201,58,42,.11); }
+.grade-pill.grade-f { color: #fff; background: var(--down); }
+/* app.js puts a breakdown after its row's last tile for the width it drew at, and draws the
+   board again when the window crosses 900px; dense packing covers the moment in between. */
+.grade-board { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; grid-auto-flow: row dense; }
+/* A tapped class's breakdown and picks: the full width, on the row under its tile. */
+.grade-panel { grid-column: 1 / -1; display: grid; gap: 8px; }
+.grade-panel .grade-detail { margin-top: 0; }
+@media (min-width: 900px) { .grade-board { grid-template-columns: repeat(4, 1fr); } }
+.grade-tile {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 8px 10px; border: 1px solid var(--edge); border-left: 3px solid var(--tc, var(--edge));
+  border-radius: var(--radius); background: var(--surface); font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.grade-tile:hover { background: var(--surface-2); }
+.grade-tile.active { border-color: var(--red); border-left-color: var(--tc, var(--red)); box-shadow: 0 0 0 1px var(--red); }
+.grade-tile:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.grade-tile-logo { width: 26px; height: 26px; flex: none; }
+.grade-tile-who { display: flex; flex-direction: column; min-width: 0; }
+.grade-tile-nick { font-family: "Archivo", sans-serif; font-weight: 800; font-stretch: 90%; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grade-tile-sub { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
+.grade-tile-letter { margin-left: auto; flex: none; font-size: 14px; }
+.grade-detail { margin-top: 10px; padding: 12px 14px; }
+.gd-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.gd-logo { width: 38px; height: 38px; flex: none; }
+.gd-who { min-width: 0; }
+.gd-name { font-family: "Archivo", sans-serif; font-weight: 800; font-stretch: 90%; font-size: 16px; }
+.gd-sub { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
+.gd-letter { margin-left: auto; font-size: 22px; min-width: 46px; padding: 5px 8px; }
+/* Value / Fit / Haul: each a bar either side of the league's average (the centre line). */
+.gd-part { display: grid; grid-template-columns: 44px 1fr 40px; align-items: center; column-gap: 10px; margin-top: 8px; font-size: 12px; }
+.gd-label { font-family: "Archivo", sans-serif; font-weight: 800; font-size: 11px; letter-spacing: .04em; }
+.gd-bar { position: relative; height: 6px; border-radius: 3px; background: var(--surface-2); }
+.gd-bar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--text-faint); }
+.gd-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+.gd-fill.gd-up { left: 50%; background: var(--up); }
+.gd-fill.gd-down { right: 50%; background: var(--down); }
+.gd-val { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.gd-note { grid-column: 2 / 4; font-size: 10.5px; color: var(--text-faint); margin-top: 2px; }
+.gd-facts { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--edge); font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+.dc-tags { display: block; margin-top: 2px; font-size: 10.5px; font-weight: 500; color: var(--text-faint); }
+.dr-name { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: inherit; text-align: left; cursor: pointer; }
+.dr-name:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; border-radius: 2px; }
+.dc-player .dev-badge { margin-left: 6px; vertical-align: 1px; }
+.dr-from { display: block; font-size: 10px; color: var(--text-faint); }
+.dr-grade { text-align: center; }
+.dr-tag { display: block; margin-top: 2px; font-family: "Archivo", sans-serif; font-weight: 800; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.dr-steal { color: var(--up); }
+.dr-reach { color: var(--down); }
 .needs-matrix { width: 100%; border-collapse: collapse; font-size: 12px; }
 .needs-matrix th {
   background: var(--surface-2); color: var(--text-faint);
@@ -985,9 +1070,8 @@ a.card:active { background: var(--surface-2); }
 .fit-badge.fit-depth { color: var(--text-dim); background: var(--surface-2); }
 .fit-badge.fit-luxury { color: #7b4fd0; background: rgba(123,79,208,.12); }
 .tab .ts { display: none; }
-/* Short labels on narrow desktops: with eleven tabs (Updates and
-   Transactions joined on 2026-10-16) the full-label nav is ~1245px wide, so full
-   labels wait for a 1280px window; below that the nav would scroll. */
+/* Short labels on narrow desktops: full labels wait for a 1280px window, below which the
+   nav would scroll (the paddings that make each tab count fit are with the nav, below). */
 @media (max-width: 1279px) {
   .tab .tl { display: none; }
   .tab .ts { display: inline; }
@@ -1119,7 +1203,7 @@ a.card:active { background: var(--surface-2); }
   }
   .tab {
     flex: none; flex-direction: row; gap: 7px;
-    font-size: 13px; padding: 10px 16px 12px;
+    font-size: 13px; padding: 10px 12px 12px;
     border-radius: 0;
   }
   .tab:first-child { margin-left: auto; }
@@ -1158,38 +1242,40 @@ a.card:active { background: var(--surface-2); }
 
 @media (min-width: 900px) and (max-width: 1279px) {
   .tabbar { gap: 2px; }
-  .tab { padding: 10px 11px 12px; }
+  .tab { padding: 10px 9px 12px; }
 }
-/* Eleven short-label tabs are ~950px at that padding: a hair tighter on the narrowest
-   desktops so the nav fits a 900px window instead of scrolling. */
+/* The narrowest desktops: tighter still, so the nav fits a 900px window instead of scrolling. */
 @media (min-width: 900px) and (max-width: 1023px) {
-  .tab { padding: 10px 8px 12px; gap: 6px; }
+  .tab { padding: 10px 5px 12px; gap: 6px; }
 }
-/* Twelve tabs when the league has rules (2026-10-22): the nav at these paddings measured
-   1340px with full labels and 1033 / 949px short (Chrome), so it would scroll at every
-   desktop width just past each step above. A twelve-tab nav takes a little less padding a
-   tab and fits where the eleven-tab one does. Eleven-tab navs are untouched. Help without
-   Rules is a twelfth tab the same way (1334 / 1028 / 944px at the eleven-tab paddings). */
+/* Twelve tabs since the Draft tab joined (2026-11-15), measured in Chrome: the tabs'
+   own content is 887px with full labels, 745 short and 733 at the narrowest step. At 12 /
+   9 / 5px a side the nav is 1241 / 983 / 875px, so it fits a 1280, 1024 and 900px window
+   with room for a classic scrollbar. Each rule below is one more tab (Rules, Help) at the
+   same three steps. */
+/* Thirteen tabs, Rules or Help (first 2026-10-22, remeasured with Draft 2026-11-15): at
+   9 / 6 / 5px a side the nav is 1245 / 977 / 938px with Help, and 1251 / 983 / 944px with
+   Rules (its label is 6px wider). Both fit a 1280 and a 1024px window. The narrowest step
+   keeps the 5px floor (3px would put a label 8px from the next tab's icon) and scrolls in a
+   900-944px window, the last tab starting off the nav's end behind its thin scrollbar. */
 @media (min-width: 900px) {
-  .tabbar:has(> .tab:is([data-tab="rules"], [data-tab="help"]):not([hidden])) > .tab { padding-left: 13px; padding-right: 13px; }
+  .tabbar:has(> .tab:is([data-tab="rules"], [data-tab="help"]):not([hidden])) > .tab { padding-left: 9px; padding-right: 9px; }
 }
 @media (min-width: 900px) and (max-width: 1279px) {
-  .tabbar:has(> .tab:is([data-tab="rules"], [data-tab="help"]):not([hidden])) > .tab { padding-left: 10px; padding-right: 10px; }
+  .tabbar:has(> .tab:is([data-tab="rules"], [data-tab="help"]):not([hidden])) > .tab { padding-left: 6px; padding-right: 6px; }
 }
 @media (min-width: 900px) and (max-width: 1023px) {
   .tabbar:has(> .tab:is([data-tab="rules"], [data-tab="help"]):not([hidden])) > .tab { padding-left: 5px; padding-right: 5px; }
 }
-/* Thirteen tabs, Rules and Help both (2026-10-23): at the twelve-tab paddings the nav
-   measured 1352 / 1083 / 940px (Chrome). 9px a side is 1248px and 7px is 1005px, so it fits
-   from 1280px and from 1024px with room to spare; the narrowest step keeps the twelve-tab
-   bar's 5px floor and fits from a 941px window (remeasured, 2026-10-23), scrolling below
-   that: in a 900-940px window Help starts off the nav's end, behind its thin scrollbar.
-   3px a side would fit 900px but put a label 8px from the next tab's icon, under that floor. */
+/* Fourteen tabs, Rules and Help both (first 2026-10-23, remeasured with Draft 2026-11-15):
+   997 / 855 / 841px of content, so 6 / 5 / 5px a side is 1243 / 1021 / 1007px. It fits from
+   1280px and from a 1024px window (just: a classic scrollbar makes it scroll a few pixels
+   there), and scrolls in a 900-1006px window, the 5px floor again. */
 @media (min-width: 900px) {
-  .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { padding-left: 9px; padding-right: 9px; }
+  .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { padding-left: 6px; padding-right: 6px; }
 }
 @media (min-width: 900px) and (max-width: 1279px) {
-  .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { padding-left: 7px; padding-right: 7px; }
+  .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { padding-left: 5px; padding-right: 5px; }
 }
 @media (min-width: 900px) and (max-width: 1023px) {
   .tabbar:has(> .tab[data-tab="rules"]:not([hidden])):has(> .tab[data-tab="help"]:not([hidden])) > .tab { padding-left: 5px; padding-right: 5px; }
