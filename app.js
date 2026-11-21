@@ -3918,6 +3918,7 @@ const DRAFT_GROUP_TEXT = {
   wildCard: "Lost in the Wild Card round", divisional: "Lost in the Divisional round",
   conference: "Lost the conference title game", superBowl: "Lost the Super Bowl",
   champion: "Won the Super Bowl", alive: "Still playing", out: "Out of the playoffs",
+  finalist: "Played in the Super Bowl",
 };
 
 function teamByAbbr(abbr) {
@@ -3998,10 +3999,16 @@ function renderDraftOrder(view) {
   }
   const round = traded ? hqState.orderRound : 1;
   const card = el("div", "card draft-order");
+  // One divider, where the playoff teams start: an order read off Madden's screens can put
+  // a team that missed among them (Elite 32's 2027 Rams), and that row carries its own note.
   let prevMissed = null;
+  let divided = false;
   for (const s of order.slots) {
     const missed = s.group === "missed";
-    if (prevMissed === true && !missed) card.appendChild(el("div", "do-divider", order.phase === "regular" ? "Playoff spots" : "Playoff teams · in the order they go out"));
+    if (!divided && prevMissed === true && !missed) {
+      card.appendChild(el("div", "do-divider", order.phase === "regular" ? "Playoff spots" : "Playoff teams · in the order they go out"));
+      divided = true;
+    }
     prevMissed = missed;
     const trade = traded ? (s.traded || []).find((t) => t.round === round) : null;
     const ownerAbbr = trade ? trade.to : s.team;
@@ -4018,7 +4025,8 @@ function renderDraftOrder(view) {
     const who = el("div", "wire-who");
     who.appendChild(el("div", "wire-name", owner ? owner.nick : ownerAbbr));
     const sub = [trade ? `from ${earner ? earner.nick : s.team}, ${slotRecord(s)}` : slotRecord(s), DRAFT_GROUP_TEXT[s.group] || ""];
-    if (s.tie) sub.push(s.tieUnmeasured ? "tied on record, schedule not on hand" : "tied on record and schedule");
+    if (s.note) sub.push(s.note);
+    else if (s.tie) sub.push(s.tieUnmeasured ? "tied on record, schedule not on hand" : "tied on record and schedule");
     who.appendChild(el("div", "wire-sub", sub.filter(Boolean).join(" · ")));
     row.appendChild(who);
     const needs = owner ? topNeeds(owner.teamId) : [];
@@ -4035,13 +4043,18 @@ function renderDraftOrder(view) {
   const unmatched = order.tradesUnmatched || 0;
   const lost = unmatched ? ` ${unmatched} traded pick${unmatched === 1 ? "" : "s"} there couldn't be matched to a team in this league and ${unmatched === 1 ? "isn't" : "aren't"} shown.` : "";
   const trades = traded
-    ? `Traded picks are from Madden's Draft Picks screens${asOf}; a trade made since then isn't shown yet.${lost}`
+    ? order.fromScreens
+      ? `Traded picks show who held them then; a trade made since isn't shown yet.${lost}`
+      : `Traded picks are from Madden's Draft Picks screens${asOf}; a trade made since then isn't shown yet.${lost}`
     : unmatched
       ? `Every round runs in this order here: the traded picks on Madden's Draft Picks screens${asOf} couldn't be matched to teams in this league, so none are shown.`
       : order.tradesAsOf
         ? `Every round runs in this order: no picks had been traded on Madden's Draft Picks screens${asOf}.`
         : "Every round runs in this order. Picks traded in Madden aren't in EA's data, so each pick shows the team whose record earned it.";
-  view.appendChild(el("div", "news-disclaimer", "Madden's order: teams that missed the playoffs pick first, worst record first, then the playoff teams in the round they went out, the champion last. A tie on record goes to the easier schedule (opponents' combined record); \"tied\" means nothing on hand separates them (level on both, or a schedule not on hand), and Madden settles it. " + trades + " The tags are each team's top needs right now."));
+  const rule = order.fromScreens
+    ? `This is Madden's own order, read from every team's Draft Picks screen on ${calendarDate(order.fromScreens)}.`
+    : "Madden's order: teams that missed the playoffs pick first, worst record first, then the playoff teams in the round they went out, the champion last. A tie on record goes to the easier schedule (opponents' combined record); \"tied\" means nothing on hand separates them (level on both, or a schedule not on hand), and Madden settles it.";
+  view.appendChild(el("div", "news-disclaimer", rule + " " + trades + " The tags are each team's top needs right now."));
 }
 
 /* ---------- Draft tab: grades ---------- */
